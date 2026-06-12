@@ -60,7 +60,7 @@ logs/
 ## 方式一：直接部署 / systemd
 
 ```bash
-git clone https://github.com/<owner>/xbot.git
+git clone https://github.com/KakidSan/Xbot.git
 cd xbot
 chmod +x install.sh
 ./install.sh
@@ -88,18 +88,18 @@ chmod +x install.sh
 Xbot 镜像托管在 GitHub Container Registry：
 
 ```text
-ghcr.io/<owner>/xbot:latest
-ghcr.io/<owner>/xbot:vX.Y.Z
+ghcr.io/kakidsan/xbot:latest
+ghcr.io/kakidsan/xbot:vX.Y.Z
 ```
 
-仓库发布后，将 `<owner>` 替换为实际 GitHub 用户名或组织名。
+仓库发布后，镜像地址使用小写命名空间：`ghcr.io/kakidsan/xbot`。
 
 ### 1. 准备配置
 
 Docker 部署可以复用安装器的配置生成向导，但不执行完整安装：
 
 ```bash
-git clone https://github.com/<owner>/xbot.git
+git clone https://github.com/KakidSan/Xbot.git
 cd xbot
 chmod +x install.sh
 ./install.sh
@@ -126,7 +126,7 @@ docker run -d \
   -v "$PWD/data:/app/data" \
   -v "$PWD/logs:/app/logs" \
   -v "$PWD/.install-state:/app/.install-state" \
-  ghcr.io/<owner>/xbot:latest
+  ghcr.io/kakidsan/xbot:latest
 ```
 
 查看日志：
@@ -152,7 +152,7 @@ docker rm xbot
 纯 `docker run` 模式建议通过 SSH 手动升级：
 
 ```bash
-docker pull ghcr.io/<owner>/xbot:latest
+docker pull ghcr.io/kakidsan/xbot:latest
 docker stop xbot
 docker rm xbot
 # 重新执行上面的 docker run 命令
@@ -167,7 +167,7 @@ Docker Compose 是推荐的 Docker 部署方式。
 ### 1. 准备配置
 
 ```bash
-git clone https://github.com/<owner>/xbot.git
+git clone https://github.com/KakidSan/Xbot.git
 cd xbot
 chmod +x install.sh
 ./install.sh
@@ -190,7 +190,7 @@ mkdir -p data logs .install-state
 ```yaml
 services:
   xbot:
-    image: ghcr.io/<owner>/xbot:latest
+    image: ghcr.io/kakidsan/xbot:latest
     # 如果暂时不用 GHCR，可以改成本地构建：
     # build: .
     container_name: xbot
@@ -208,7 +208,7 @@ services:
       XBOT_COMPOSE_FILES: docker-compose.yml
       XBOT_COMPOSE_SERVICE: xbot
       # 可选：设置后 Bot 更新会优先拉取指定版本镜像
-      # XBOT_GHCR_IMAGE: ghcr.io/<owner>/xbot
+      # XBOT_GHCR_IMAGE: ghcr.io/kakidsan/xbot
 ```
 
 启动：
@@ -266,7 +266,7 @@ services:
 如果暂时不使用 GHCR，可以把 `docker-compose.yml` 里的：
 
 ```yaml
-image: ghcr.io/<owner>/xbot:latest
+image: ghcr.io/kakidsan/xbot:latest
 ```
 
 注释掉，并启用：

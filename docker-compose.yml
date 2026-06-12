@@ -1,0 +1,22 @@
+services:
+  xbot:
+    # GHCR image. Replace <owner> after the GitHub repository is created.
+    image: ghcr.io/<owner>/xbot:latest
+    # If you do not use GHCR yet, build locally instead:
+    # build: .
+    container_name: xbot
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.install-state:/app/.install-state
+    environment:
+      TZ: Asia/Shanghai
+      XBOT_UPDATE_MODE: docker-compose
+      XBOT_COMPOSE_PROJECT_DIR: /compose
+      XBOT_COMPOSE_FILES: docker-compose.yml
+      XBOT_COMPOSE_SERVICE: xbot
+      # Optional. Set after replacing <owner>, e.g. ghcr.io/yourname/xbot.
+      # XBOT_GHCR_IMAGE: ghcr.io/<owner>/xbot

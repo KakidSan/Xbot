@@ -1,0 +1,19 @@
+# Optional override for Telegram Bot-triggered Docker/Compose upgrades.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.self-update.yml up -d
+#
+# Security note:
+#   /var/run/docker.sock gives this container control over the host Docker daemon.
+#   Enable this only if your Telegram admins are trusted.
+
+services:
+  xbot:
+    volumes:
+      - ./:/compose
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      XBOT_UPDATE_MODE: docker-compose
+      XBOT_COMPOSE_PROJECT_DIR: /compose
+      XBOT_COMPOSE_FILES: docker-compose.yml:docker-compose.self-update.yml
+      XBOT_COMPOSE_SERVICE: xbot

@@ -1,0 +1,4 @@
+python-telegram-bot==21.9
+PyYAML==6.0.2
+redis==5.2.1
+PyMySQL==1.1.1

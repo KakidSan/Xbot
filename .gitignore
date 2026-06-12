@@ -1,0 +1,27 @@
+config.yaml
+config.yaml.bak.*
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+.venv/
+.deps/
+.install-state/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+dist/
+
+# Local backups / generated review docs
+*.bak
+*.bak-*
+*.tar.gz
+bot_frontend_*.md
+bot_push_only_frontend_*.md
+frontend*.md
+xbot-text-topology.md
+build_frontend_texts_current.py

@@ -1,22 +1,49 @@
 services:
   xbot:
-    # GHCR image.
     image: ghcr.io/kakidsan/xbot:latest
-    # If you do not use GHCR yet, build locally instead:
+    # 开发/本地验证镜像时可改用：
     # build: .
     container_name: xbot
     restart: unless-stopped
     working_dir: /app
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+
+      # Telegram：至少需要 Bot Token 和超级管理员 ID。
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ADMIN_USER_ID: ${TELEGRAM_ADMIN_USER_ID:?set TELEGRAM_ADMIN_USER_ID}
+      # 多个 ID 用英文逗号分隔，例如：123,456
+      TELEGRAM_MANAGER_USER_IDS: ${TELEGRAM_MANAGER_USER_IDS:-}
+      TELEGRAM_AUTHORIZED_USER_IDS: ${TELEGRAM_AUTHORIZED_USER_IDS:-}
+
+      # Redis 连接参数。
+      REDIS_HOST: ${REDIS_HOST:?set REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+
+      # MySQL 连接参数。建议使用只有 SELECT 权限的只读账号。
+      MYSQL_HOST: ${MYSQL_HOST:?set MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:?set MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+
+      # 采集间隔、IP-API 限速、缓存路径、缓存保留时间由程序内置/Bot 参数配置管理。
+
+      # Bot 内「后台更新」所需参数。不开启 Docker socket 时可以保留这些值，更新按钮会提示缺少 socket。
+      UPDATE_MODE: docker-compose
+      COMPOSE_PROJECT_DIR: /compose
+      COMPOSE_FILES: docker-compose.yml
+      COMPOSE_SERVICE: xbot
+      # GHCR 镜像地址用于 Bot 后台更新拉取指定版本。
+      GHCR_IMAGE: ghcr.io/kakidsan/xbot
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.install-state:/app/.install-state
-    environment:
-      TZ: Asia/Shanghai
-      XBOT_UPDATE_MODE: docker-compose
-      XBOT_COMPOSE_PROJECT_DIR: /compose
-      XBOT_COMPOSE_FILES: docker-compose.yml
-      XBOT_COMPOSE_SERVICE: xbot
-      # Optional. Set to pin update pulls to this GHCR image.
-      # XBOT_GHCR_IMAGE: ghcr.io/kakidsan/xbot
+
+      # 可选：允许 Bot 在 Telegram 内执行 Docker Compose 自更新。
+      # 安全提醒：挂载 docker.sock 后，容器拥有宿主机 Docker 控制权，只建议可信管理员环境开启。
+      # - ./:/compose
+      # - /var/run/docker.sock:/var/run/docker.sock

@@ -27,3 +27,7 @@ frontend-text-map.md
 frontend_texts*.md
 frontend_texts_review.md
 xbot-text-topology.md
+
+.env
+.env.*
+!.env.example

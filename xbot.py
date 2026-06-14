@@ -2,9 +2,8 @@
 """Xbot Telegram Monitor Bot.
 
 当前版本能力：
-- 非 Docker 后台常驻运行；
-- 使用外挂 YAML 配置；
-- 配置文件变化后自动重新加载；
+- Docker / Docker Compose 后台常驻运行；
+- 使用环境变量传入 Telegram / Redis / MySQL 连接参数；
 - Telegram 用户白名单校验；
 - MySQL 连接测试，只执行只读查询；
 - Redis 连接测试，并读取少量摘要信息格式化展示。
@@ -20,6 +19,7 @@ import html
 import ipaddress
 import json
 import logging
+import os
 import re
 import signal
 import socket
@@ -37,7 +37,6 @@ from typing import Any
 
 import pymysql
 import redis
-import yaml
 from pymysql import MySQLError
 from redis.exceptions import (
     AuthenticationError,
@@ -68,10 +67,22 @@ DEFAULT_ALLOWLIST_NOTIFICATION_KINDS = {"collector", "traffic_alert", "ip_alert"
 COLLECTOR_HEALTH_SERVICES = {"redis": "Redis", "mysql": "MySQL", "ip_api": "IP-API"}
 TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES = 100 * 1024 ** 3
 IP_ALERT_DEFAULT_CITY_THRESHOLD = 3
+DEFAULT_CACHE_RETENTION_DAYS = 31
+DEFAULT_COLLECTOR_INTERVAL_SECONDS = 60.0
+DEFAULT_IP_GEO_QUERIES_PER_MINUTE = 30
+CACHE_RETENTION_OPTIONS = {
+    "1m": (31, "一月"),
+    "1q": (93, "一季"),
+    "1y": (366, "一年"),
+    "all": (0, "一切"),
+}
 ALERT_DEFAULT_PERIOD = "24h"
 ALERT_PERIOD_LABELS = {"1h": "近 1 小时", "24h": "近 24 小时", "7d": "近 7 天", "today": "今天", "week": "本周"}
 PROXY_PROTOCOL_NOTICE = "⚠️ 此功能准确性受 Proxy Protocol 配置影响，可点击 /help 查看说明。"
 APP_DIR = Path(__file__).resolve().parent
+DEFAULT_CACHE_PATH = APP_DIR / "data" / "xbot.sqlite3"
+TAGS_API_URL = "https://api.github.com/repos/KakidSan/Xbot/tags"
+GHCR_IMAGE = "ghcr.io/kakidsan/xbot"
 VERSION_FILE = APP_DIR / "VERSION"
 FALLBACK_VERSION = "0.0.0-dev"
 UPDATE_SCRIPT = APP_DIR / "scripts" / "update.sh"
@@ -120,24 +131,21 @@ def parse_version_tuple(tag: str) -> tuple[int, int, int, str]:
 
 
 def latest_remote_version_sync() -> tuple[str | None, str | None]:
-    rc, _, _ = run_command_sync(["git", "rev-parse", "--is-inside-work-tree"])
-    if rc != 0:
-        return None, "当前目录不是 Git 仓库，无法在线检查更新。"
-    rc, remote, err = run_command_sync(["git", "remote", "get-url", "origin"])
-    if rc != 0 or not remote:
-        return None, "未检测到 Git remote origin，无法在线检查更新。"
-    rc, out, err = run_command_sync(["git", "ls-remote", "--tags", "--refs", "origin"], timeout=30)
-    if rc != 0:
-        return None, f"读取远程版本失败：{err or out or 'unknown error'}"
-    tags: list[str] = []
-    for line in out.splitlines():
-        ref = line.rsplit("refs/tags/", 1)[-1].strip()
-        if VERSION_TAG_RE.fullmatch(ref):
-            tags.append(ref)
-    if not tags:
-        return None, "远程仓库没有符合 vX.Y.Z 格式的版本标签。"
-    tags.sort(key=parse_version_tuple, reverse=True)
-    return tags[0], None
+    try:
+        req = urllib.request.Request(
+            TAGS_API_URL,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "xbot-version-check"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        tags = [str(item.get("name") or "").strip() for item in data if isinstance(item, dict)]
+        tags = [tag for tag in tags if VERSION_TAG_RE.fullmatch(tag)]
+        if tags:
+            tags.sort(key=parse_version_tuple, reverse=True)
+            return tags[0], None
+        return None, "GitHub tags 中没有符合 vX.Y.Z 格式的版本标签。"
+    except Exception as exc:
+        return None, f"读取 GitHub tags 失败：{type(exc).__name__}: {exc}"
 
 
 def current_release_tag(version: str | None = None) -> str | None:
@@ -305,7 +313,7 @@ def proxy_protocol_help_text() -> str:
 @dataclass(frozen=True)
 class TelegramConfig:
     bot_token: str
-    admin_user_id: int | None = None  # 唯一超级管理员，只能通过 config.yaml 修改。
+    admin_user_id: int | None = None  # 唯一超级管理员，只能通过环境变量修改。
     manager_user_ids: set[int] = field(default_factory=set)  # 普通管理员，可由超级管理员在 Bot 内管理。
     authorized_user_ids: set[int] = field(default_factory=set)  # 普通授权用户。
 
@@ -331,8 +339,6 @@ class RedisConfig:
     port: int | None = None
     password: str | None = None
     db: int = 0
-    ssl: bool = False
-    prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -349,16 +355,15 @@ class AppConfig:
     telegram: TelegramConfig
     redis: RedisConfig
     mysql: MySQLConfig
-    config_watch_interval_seconds: float = 2.0
     cache_path: Path = Path("data/xbot.sqlite3")
-    collector_interval_seconds: float = 60.0
+    collector_interval_seconds: float = DEFAULT_COLLECTOR_INTERVAL_SECONDS
     traffic_dashboard_refresh_seconds: float = 60.0
-    cache_retention_days: int = 7
-    ip_geo_queries_per_minute: int = 30
+    cache_retention_days: int = DEFAULT_CACHE_RETENTION_DAYS
+    ip_geo_queries_per_minute: int = DEFAULT_IP_GEO_QUERIES_PER_MINUTE
 
 
 def _as_int_set(value: Any) -> set[int]:
-    """Parse Telegram user id whitelist from YAML list or comma-separated string."""
+    """Parse Telegram user ids from env comma strings or internal JSON arrays."""
     if value is None:
         return set()
     if isinstance(value, str):
@@ -366,7 +371,7 @@ def _as_int_set(value: Any) -> set[int]:
     elif isinstance(value, list):
         raw_items = value
     else:
-        raise ValueError("telegram.allowed_user_ids 必须是数组或逗号分隔字符串")
+        raise ValueError("Telegram 用户 ID 列表必须是英文逗号分隔字符串")
 
     result: set[int] = set()
     for item in raw_items:
@@ -383,14 +388,46 @@ def _optional_int(value: Any) -> int | None:
     return int(value) if value not in (None, "") else None
 
 
-def load_config(path: Path) -> AppConfig:
-    if not path.exists():
-        raise FileNotFoundError(f"配置文件不存在：{path}")
+def env_value(name: str, default: Any = None) -> Any:
+    value = os.environ.get(name)
+    return default if value is None or value == "" else value
 
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError("配置文件根节点必须是对象")
 
+def env_int(name: str, default: Any = None) -> Any:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
+    """Populate the internal runtime Config from Docker/Compose environment variables."""
+    telegram_raw = raw.setdefault("telegram", {})
+    redis_raw = raw.setdefault("redis", {})
+    mysql_raw = raw.setdefault("mysql", {})
+    app_raw = raw.setdefault("app", {})
+
+    telegram_raw["bot_token"] = env_value("TELEGRAM_BOT_TOKEN", telegram_raw.get("bot_token"))
+    telegram_raw["admin_user_id"] = env_int("TELEGRAM_ADMIN_USER_ID", telegram_raw.get("admin_user_id"))
+    telegram_raw["manager_user_ids"] = env_value("TELEGRAM_MANAGER_USER_IDS", telegram_raw.get("manager_user_ids"))
+    telegram_raw["authorized_user_ids"] = env_value("TELEGRAM_AUTHORIZED_USER_IDS", telegram_raw.get("authorized_user_ids"))
+
+    redis_raw["host"] = env_value("REDIS_HOST", redis_raw.get("host"))
+    redis_raw["port"] = env_int("REDIS_PORT", redis_raw.get("port"))
+    redis_raw["password"] = env_value("REDIS_PASSWORD", redis_raw.get("password"))
+    redis_raw["db"] = env_int("REDIS_DB", redis_raw.get("db", 0))
+    mysql_raw["host"] = env_value("MYSQL_HOST", mysql_raw.get("host"))
+    mysql_raw["port"] = env_int("MYSQL_PORT", mysql_raw.get("port"))
+    mysql_raw["database"] = env_value("MYSQL_DATABASE", mysql_raw.get("database"))
+    mysql_raw["username"] = env_value("MYSQL_USERNAME", mysql_raw.get("username"))
+    mysql_raw["password"] = env_value("MYSQL_PASSWORD", mysql_raw.get("password"))
+
+    return raw
+
+
+def build_config_from_env() -> AppConfig:
+    raw: dict[str, Any] = {"telegram": {}, "redis": {}, "mysql": {}, "app": {}}
+    raw = apply_env_overrides(raw)
     telegram_raw = raw.get("telegram") or {}
     redis_raw = raw.get("redis") or {}
     mysql_raw = raw.get("mysql") or {}
@@ -398,19 +435,19 @@ def load_config(path: Path) -> AppConfig:
 
     token = str(telegram_raw.get("bot_token") or "").strip()
     if not token or token == "123456:replace_me":
-        raise ValueError("telegram.bot_token 不能为空，请填写 BotFather 提供的 Token")
+        raise ValueError("TELEGRAM_BOT_TOKEN 不能为空，请填写 BotFather 提供的 Token")
+
+    cache_path = Path(str(app_raw.get("cache_path") or DEFAULT_CACHE_PATH)).expanduser()
 
     admin_raw = telegram_raw.get("admin_user_id")
     admin_user_id = int(admin_raw) if admin_raw not in (None, "") else None
     manager_user_ids = _as_int_set(telegram_raw.get("manager_user_ids"))
-    if "authorized_user_ids" in telegram_raw:
-        authorized_user_ids = _as_int_set(telegram_raw.get("authorized_user_ids"))
+    authorized_user_ids = _as_int_set(telegram_raw.get("authorized_user_ids"))
+    stored_roles = auth_roles_load_sync(cache_path)
+    if stored_roles is None:
+        auth_roles_save_sync(cache_path, manager_user_ids, authorized_user_ids)
     else:
-        legacy_allowed = _as_int_set(telegram_raw.get("allowed_user_ids"))
-        admin_user_id = admin_user_id or (min(legacy_allowed) if legacy_allowed else None)
-        authorized_user_ids = set(legacy_allowed)
-        if admin_user_id is not None:
-            authorized_user_ids.discard(admin_user_id)
+        manager_user_ids, authorized_user_ids = stored_roles
     if admin_user_id is not None:
         manager_user_ids.discard(admin_user_id)
         authorized_user_ids.discard(admin_user_id)
@@ -428,8 +465,6 @@ def load_config(path: Path) -> AppConfig:
             port=_optional_int(redis_raw.get("port")),
             password=redis_raw.get("password") or None,
             db=int(redis_raw.get("db", 0)),
-            ssl=bool(redis_raw.get("ssl", False)),
-            prefix=str(redis_raw.get("prefix", "") or ""),
         ),
         mysql=MySQLConfig(
             host=str(mysql_raw.get("host", "") or ""),
@@ -438,17 +473,12 @@ def load_config(path: Path) -> AppConfig:
             username=str(mysql_raw.get("username", "") or ""),
             password=str(mysql_raw.get("password", "") or ""),
         ),
-        config_watch_interval_seconds=float(app_raw.get("config_watch_interval_seconds", 2.0)),
-        cache_path=Path(str(app_raw.get("cache_path", "data/xbot.sqlite3") or "data/xbot.sqlite3")).expanduser(),
-        collector_interval_seconds=float(app_raw.get("collector_interval_seconds", 60.0)),
-        traffic_dashboard_refresh_seconds=max(30.0, float(app_raw.get("traffic_dashboard_refresh_seconds", 60.0))),
-        cache_retention_days=int(app_raw.get("cache_retention_days", 7)),
-        ip_geo_queries_per_minute=max(1, min(40, int(app_raw.get("ip_geo_queries_per_minute", 30)))),
+        cache_path=cache_path,
+        collector_interval_seconds=DEFAULT_COLLECTOR_INTERVAL_SECONDS,
+        traffic_dashboard_refresh_seconds=60.0,
+        cache_retention_days=DEFAULT_CACHE_RETENTION_DAYS,
+        ip_geo_queries_per_minute=DEFAULT_IP_GEO_QUERIES_PER_MINUTE,
     )
-
-
-def file_signature(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def user_id(update: Update) -> int | None:
@@ -493,99 +523,6 @@ def is_admin_user_id(uid: int | None, cfg: AppConfig) -> bool:
     return uid is not None and uid in cfg.telegram.admin_user_ids
 
 
-def _telegram_role_sets_from_config_raw(telegram_raw: dict[str, Any]) -> tuple[int | None, set[int], set[int]]:
-    admin_raw = telegram_raw.get("admin_user_id")
-    legacy_ids = _as_int_set(telegram_raw.get("allowed_user_ids"))
-    admin_user_id = int(admin_raw) if admin_raw not in (None, "") else (min(legacy_ids) if legacy_ids else None)
-    manager_user_ids = _as_int_set(telegram_raw.get("manager_user_ids"))
-    if "authorized_user_ids" in telegram_raw:
-        authorized_user_ids = _as_int_set(telegram_raw.get("authorized_user_ids"))
-    else:
-        authorized_user_ids = set(legacy_ids)
-    if admin_user_id is not None:
-        manager_user_ids.discard(admin_user_id)
-        authorized_user_ids.discard(admin_user_id)
-    authorized_user_ids.difference_update(manager_user_ids)
-    return admin_user_id, manager_user_ids, authorized_user_ids
-
-
-def update_telegram_roles_in_config_sync(
-    config_path: Path,
-    add_authorized_user_id: int | None = None,
-    remove_authorized_user_ids: set[int] | None = None,
-    promote_manager_user_ids: set[int] | None = None,
-    demote_manager_user_ids: set[int] | None = None,
-    remove_manager_user_ids: set[int] | None = None,
-) -> tuple[set[int], set[int]]:
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError("配置文件根节点必须是对象")
-    telegram_raw = raw.setdefault("telegram", {})
-    if not isinstance(telegram_raw, dict):
-        raise ValueError("telegram 配置必须是对象")
-
-    admin_user_id, managers, users = _telegram_role_sets_from_config_raw(telegram_raw)
-    if admin_user_id is not None:
-        telegram_raw["admin_user_id"] = admin_user_id
-
-    def ensure_not_super_admin(uid: int) -> None:
-        if admin_user_id is not None and int(uid) == admin_user_id:
-            raise ValueError("超级管理员只允许通过配置文件管理")
-
-    if add_authorized_user_id is not None:
-        target = int(add_authorized_user_id)
-        ensure_not_super_admin(target)
-        if target not in managers:
-            users.add(target)
-
-    if remove_authorized_user_ids:
-        for uid in remove_authorized_user_ids:
-            target = int(uid)
-            ensure_not_super_admin(target)
-            users.discard(target)
-
-    if promote_manager_user_ids:
-        for uid in promote_manager_user_ids:
-            target = int(uid)
-            ensure_not_super_admin(target)
-            users.discard(target)
-            managers.add(target)
-
-    if demote_manager_user_ids:
-        for uid in demote_manager_user_ids:
-            target = int(uid)
-            ensure_not_super_admin(target)
-            managers.discard(target)
-            users.add(target)
-
-    if remove_manager_user_ids:
-        for uid in remove_manager_user_ids:
-            target = int(uid)
-            ensure_not_super_admin(target)
-            managers.discard(target)
-            users.discard(target)
-
-    if admin_user_id is not None:
-        managers.discard(admin_user_id)
-        users.discard(admin_user_id)
-    users.difference_update(managers)
-
-    telegram_raw["manager_user_ids"] = sorted(managers)
-    telegram_raw["authorized_user_ids"] = sorted(users)
-    telegram_raw.pop("allowed_user_ids", None)
-    config_path.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return managers, users
-
-
-def update_authorized_users_in_config_sync(config_path: Path, add_user_id: int | None = None, remove_user_ids: set[int] | None = None) -> set[int]:
-    _, users = update_telegram_roles_in_config_sync(
-        config_path,
-        add_authorized_user_id=add_user_id,
-        remove_authorized_user_ids=remove_user_ids,
-    )
-    return users
-
-
 def tcp_check(host: str, port: int, service_name: str) -> tuple[bool, list[str]]:
     """Check TCP reachability without exposing configured host/port in messages."""
     try:
@@ -618,7 +555,10 @@ def mysql_config_missing(cfg: MySQLConfig) -> bool:
     return not cfg.host.strip() or not cfg.port or not cfg.username.strip() or not cfg.database.strip()
 
 
-ONLINE_IP_PROVIDERS = ("heki", "soga")
+ONLINE_IP_KEY_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("Heki", "heki:ip:*", r"heki:ip:(\d+):(.+)"),
+    ("Soga", "soga_conn_*", r"soga_conn_(\d+)_(.+)"),
+)
 
 
 def redis_readable_summary(client: redis.Redis, cfg: RedisConfig) -> list[str]:
@@ -660,7 +600,13 @@ def redis_readable_summary(client: redis.Redis, cfg: RedisConfig) -> list[str]:
         ttl_text = "，".join(f"{name}: {count}" for name, count in sorted(ttl_counter.items()))
         lines.append(f"✅ 抽样 Key 过期状态：{ttl_text}")
 
-    device_pattern = f"{cfg.prefix}user_devices:*"
+    online_key_counts: list[str] = []
+    for label, pattern, _ in ONLINE_IP_KEY_SPECS:
+        count = sum(1 for _ in client.scan_iter(match=pattern, count=100))
+        online_key_counts.append(f"{label}: {count}")
+    lines.append(f"✅ 在线 IP Key 数量：{'，'.join(online_key_counts)}")
+
+    device_pattern = "user_devices:*"
     device_count = sum(1 for _ in client.scan_iter(match=device_pattern, count=100))
     lines.append(f"✅ XBoard 在线设备 Key 数量：{device_count}")
     return lines
@@ -672,7 +618,6 @@ def redis_client(cfg: RedisConfig) -> redis.Redis:
         port=int(cfg.port),
         password=cfg.password,
         db=cfg.db,
-        ssl=cfg.ssl,
         socket_connect_timeout=3,
         socket_timeout=5,
         decode_responses=True,
@@ -806,7 +751,11 @@ def init_cache(path: Path) -> None:
                 country TEXT,
                 region TEXT,
                 city TEXT,
+                district TEXT,
                 isp TEXT,
+                stat_area_key TEXT,
+                stat_area_name TEXT,
+                stat_area_level TEXT,
                 raw TEXT,
                 queried_at INTEGER NOT NULL DEFAULT 0
             );
@@ -930,6 +879,49 @@ def init_cache(path: Path) -> None:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_reason TEXT")
         if "ignore_note" not in active_ip_columns:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_note TEXT")
+        geo_cache_columns = {row[1] for row in conn.execute("PRAGMA table_info(ip_geo_cache)").fetchall()}
+        for column_name, column_type in {
+            "district": "TEXT",
+            "stat_area_key": "TEXT",
+            "stat_area_name": "TEXT",
+            "stat_area_level": "TEXT",
+        }.items():
+            if column_name not in geo_cache_columns:
+                conn.execute(f"ALTER TABLE ip_geo_cache ADD COLUMN {column_name} {column_type}")
+        rows_needing_stat_area = conn.execute(
+            """
+            SELECT ip, raw
+            FROM ip_geo_cache
+            WHERE (stat_area_key IS NULL OR stat_area_key = '')
+              AND raw IS NOT NULL AND raw != ''
+            LIMIT 1000
+            """
+        ).fetchall()
+        for geo_row in rows_needing_stat_area:
+            try:
+                raw_data = json.loads(str(geo_row["raw"] or "{}"))
+            except Exception:
+                continue
+            if not isinstance(raw_data, dict) or raw_data.get("status") not in (None, "success"):
+                continue
+            stat_area = build_geo_stat_area(raw_data)
+            conn.execute(
+                """
+                UPDATE ip_geo_cache
+                SET district = COALESCE(NULLIF(district, ''), ?),
+                    stat_area_key = ?,
+                    stat_area_name = ?,
+                    stat_area_level = ?
+                WHERE ip = ?
+                """,
+                (
+                    str(raw_data.get("district") or ""),
+                    stat_area["key"],
+                    stat_area["name"],
+                    stat_area["level"],
+                    str(geo_row["ip"]),
+                ),
+            )
     _INITIALIZED_CACHE_PATHS.add(cache_path)
 
 
@@ -1074,6 +1066,105 @@ def get_collector_state_sync(cache_path: Path, key: str) -> tuple[str, int] | No
     if not row:
         return None
     return str(row["value"]), int(row["updated_at"] or 0)
+
+
+def auth_roles_load_sync(cache_path: Path) -> tuple[set[int], set[int]] | None:
+    state = get_collector_state_sync(cache_path, "telegram_auth_roles")
+    if not state:
+        return None
+    try:
+        data = json.loads(state[0])
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _as_int_set(data.get("manager_user_ids")), _as_int_set(data.get("authorized_user_ids"))
+
+
+def auth_roles_save_sync(cache_path: Path, manager_user_ids: set[int], authorized_user_ids: set[int]) -> None:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    payload = json.dumps(
+        {
+            "manager_user_ids": sorted(int(uid) for uid in manager_user_ids),
+            "authorized_user_ids": sorted(int(uid) for uid in authorized_user_ids),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    with cache_connect(cache_path) as conn:
+        set_collector_state(conn, "telegram_auth_roles", payload, now_ts)
+
+
+def update_telegram_roles_in_cache_sync(
+    cache_path: Path,
+    admin_user_id: int | None,
+    current_manager_user_ids: set[int],
+    current_authorized_user_ids: set[int],
+    add_authorized_user_id: int | None = None,
+    remove_authorized_user_ids: set[int] | None = None,
+    promote_manager_user_ids: set[int] | None = None,
+    demote_manager_user_ids: set[int] | None = None,
+    remove_manager_user_ids: set[int] | None = None,
+) -> tuple[set[int], set[int]]:
+    managers = set(current_manager_user_ids)
+    users = set(current_authorized_user_ids)
+
+    def ensure_not_super_admin(uid: int) -> None:
+        if admin_user_id is not None and int(uid) == admin_user_id:
+            raise ValueError("超级管理员只允许通过环境变量管理")
+
+    if add_authorized_user_id is not None:
+        target = int(add_authorized_user_id)
+        ensure_not_super_admin(target)
+        if target not in managers:
+            users.add(target)
+
+    if remove_authorized_user_ids:
+        for uid in remove_authorized_user_ids:
+            target = int(uid)
+            ensure_not_super_admin(target)
+            users.discard(target)
+
+    if promote_manager_user_ids:
+        for uid in promote_manager_user_ids:
+            target = int(uid)
+            ensure_not_super_admin(target)
+            users.discard(target)
+            managers.add(target)
+
+    if demote_manager_user_ids:
+        for uid in demote_manager_user_ids:
+            target = int(uid)
+            ensure_not_super_admin(target)
+            managers.discard(target)
+            users.add(target)
+
+    if remove_manager_user_ids:
+        for uid in remove_manager_user_ids:
+            target = int(uid)
+            ensure_not_super_admin(target)
+            managers.discard(target)
+            users.discard(target)
+
+    if admin_user_id is not None:
+        managers.discard(admin_user_id)
+        users.discard(admin_user_id)
+    users.difference_update(managers)
+    auth_roles_save_sync(cache_path, managers, users)
+    return managers, users
+
+
+def update_authorized_users_in_cache_sync(cache_path: Path, admin_user_id: int | None, current_manager_user_ids: set[int], current_authorized_user_ids: set[int], add_user_id: int | None = None, remove_user_ids: set[int] | None = None) -> set[int]:
+    _, users = update_telegram_roles_in_cache_sync(
+        cache_path,
+        admin_user_id,
+        current_manager_user_ids,
+        current_authorized_user_ids,
+        add_authorized_user_id=add_user_id,
+        remove_authorized_user_ids=remove_user_ids,
+    )
+    return users
 
 
 def notification_status_sync(cache_path: Path, chat_id: str, default_enabled_kinds: set[str] | None = None) -> dict[str, bool]:
@@ -1470,8 +1561,8 @@ def ip_alert_rows_sync(cache_path: Path) -> list[dict[str, Any]]:
             start_ts, end_ts, period_label = alert_period_window(period, now)
             detail = conn.execute(
                 """
-                SELECT COUNT(DISTINCT COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS city_count,
-                       GROUP_CONCAT(DISTINCT COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS cities
+                SELECT COUNT(DISTINCT COALESCE(NULLIF(g.stat_area_key, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS city_count,
+                       GROUP_CONCAT(DISTINCT COALESCE(NULLIF(g.stat_area_name, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS cities
                 FROM active_ip_records AS a
                 LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
                 WHERE a.user_id = ? AND a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
@@ -1530,8 +1621,8 @@ def current_ip_alert_detail_for_user_sync(cache_path: Path, user_id: int, period
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             """
-            SELECT COUNT(DISTINCT COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS city_count,
-                   GROUP_CONCAT(DISTINCT COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS cities
+            SELECT COUNT(DISTINCT COALESCE(NULLIF(g.stat_area_key, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS city_count,
+                   GROUP_CONCAT(DISTINCT COALESCE(NULLIF(g.stat_area_name, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, ''))) AS cities
             FROM active_ip_records AS a
             LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
             WHERE a.user_id = ? AND a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
@@ -1695,9 +1786,96 @@ def get_stats_floor_ts_sync(cache_path: Path) -> int | None:
 
 
 def effective_cache_cutoff_ts_sync(cache_path: Path, retention_days: int) -> int:
+    if retention_days <= 0:
+        return get_stats_floor_ts_sync(cache_path) or 0
     retention_cutoff = int((datetime.now() - timedelta(days=retention_days)).timestamp())
     stats_floor = get_stats_floor_ts_sync(cache_path)
     return max(retention_cutoff, stats_floor or 0)
+
+
+def cache_retention_days_sync(cache_path: Path) -> int:
+    value = alert_state_get_sync(cache_path, "cache_retention_days")
+    if value is not None:
+        try:
+            parsed = int(value)
+            if parsed >= 0:
+                return parsed
+        except ValueError:
+            pass
+    return DEFAULT_CACHE_RETENTION_DAYS
+
+
+def cache_retention_option_key(days: int) -> str:
+    for key, (option_days, _) in CACHE_RETENTION_OPTIONS.items():
+        if int(days) == int(option_days):
+            return key
+    return "1m"
+
+
+def cache_retention_label(days: int) -> str:
+    return CACHE_RETENTION_OPTIONS.get(cache_retention_option_key(days), CACHE_RETENTION_OPTIONS["1m"])[1]
+
+
+def cache_retention_cutoff_ts(days: int) -> int:
+    if days <= 0:
+        return 0
+    return int((datetime.now() - timedelta(days=days)).timestamp())
+
+
+def cache_retention_preview_sync(cache_path: Path, days: int) -> dict[str, int]:
+    init_cache(cache_path)
+    cutoff_ts = cache_retention_cutoff_ts(days)
+    with cache_connect(cache_path) as conn:
+        if cutoff_ts <= 0:
+            counts = {"traffic_delta_samples": 0, "traffic_sample_gaps": 0, "traffic_ranges": 0, "active_ip_records": 0, "ip_geo_cache": 0}
+        else:
+            counts = {
+                "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "ip_geo_cache": int(conn.execute("""
+                    SELECT COUNT(*) FROM ip_geo_cache
+                    WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
+                      AND (queried_at = 0 OR queried_at < ?)
+                """, (cutoff_ts, cutoff_ts)).fetchone()[0] or 0),
+            }
+        counts["cutoff_ts"] = cutoff_ts
+        return counts
+
+
+def cache_retention_set_and_prune_sync(cache_path: Path, days: int) -> dict[str, int]:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    cutoff_ts = cache_retention_cutoff_ts(days)
+    with cache_connect(cache_path) as conn:
+        if cutoff_ts <= 0:
+            counts = {"traffic_delta_samples": 0, "traffic_sample_gaps": 0, "traffic_ranges": 0, "active_ip_records": 0, "ip_geo_cache": 0}
+        else:
+            counts = {
+                "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
+                "ip_geo_cache": int(conn.execute("""
+                    SELECT COUNT(*) FROM ip_geo_cache
+                    WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
+                      AND (queried_at = 0 OR queried_at < ?)
+                """, (cutoff_ts, cutoff_ts)).fetchone()[0] or 0),
+            }
+            conn.execute("DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,))
+            conn.execute("DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,))
+            conn.execute("DELETE FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,))
+            conn.execute("DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,))
+            conn.execute("""
+                DELETE FROM ip_geo_cache
+                WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
+                  AND (queried_at = 0 OR queried_at < ?)
+            """, (cutoff_ts, cutoff_ts))
+        set_collector_state(conn, "cache_retention_days", str(int(days)), now_ts)
+        set_collector_state(conn, "last_cleanup_at", str(now_ts), now_ts)
+    counts["cutoff_ts"] = cutoff_ts
+    return counts
 
 
 def prune_stats_before_sync(cache_path: Path, floor_ts: int) -> dict[str, int]:
@@ -1801,7 +1979,7 @@ def reset_local_cache_sync(cache_path: Path) -> dict[str, int]:
         ):
             conn.execute(f"DELETE FROM {table}")
         conn.execute(
-            "DELETE FROM collector_state WHERE key IN ('last_collect_at', 'last_traffic_sample_at', 'stats_floor_at', 'last_active_ip_records_cleared_at')"
+            "DELETE FROM collector_state WHERE key IN ('first_collect_at', 'last_collect_at', 'last_traffic_sample_at', 'stats_floor_at', 'last_active_ip_records_cleared_at')"
         )
         set_collector_state(conn, "cache_reset_at", str(now_ts), now_ts)
     return counts
@@ -1907,7 +2085,12 @@ def get_cache_counts_sync(cache_path: Path) -> dict[str, int]:
 
 
 def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int, int, str]] | str:
-    """Collect Redis Heki/Soga IP records as (user_id, ip, last_seen_ts, ttl, source_key)."""
+    """Collect Redis Heki/Soga IP records as (user_id, ip, last_seen_ts, ttl, source_key).
+
+    Heki writes heki:ip:<user_id>:<ip> keys. Current Soga writes
+    soga_conn_<user_id>_<ip> keys for connection/device-limit records.
+    Mixed Heki + Soga deployments are collected into the same local cache.
+    """
     if redis_config_missing(cfg):
         return "Redis 连接信息未输入完整"
 
@@ -1915,9 +2098,10 @@ def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int,
     records: list[tuple[int, str, int, int, str]] = []
     try:
         client.ping()
-        for provider in ONLINE_IP_PROVIDERS:
-            pattern = f"{cfg.prefix}{provider}:ip:*"
-            key_regex = rf"{re.escape(cfg.prefix)}{re.escape(provider)}:ip:(\d+):(.+)"
+        # Soga does not mirror Heki's heki:ip:<user_id>:<ip> format by replacing
+        # "heki" with "soga". Soga 2.13.x writes Redis connection-limit records as
+        # soga_conn_<user_id>_<ip> when device/IP limiting is enabled.
+        for _, pattern, key_regex in ONLINE_IP_KEY_SPECS:
             key_batch: list[Any] = []
 
             def flush_key_batch() -> None:
@@ -1965,6 +2149,9 @@ def upsert_cache_records(cache_path: Path, records: list[tuple[int, str, int, in
     user_ids = {user_id for user_id, *_ in records}
     ips = {ip for _, ip, *_ in records}
     with cache_connect(cache_path) as conn:
+        first_state = conn.execute("SELECT value FROM collector_state WHERE key = ?", ("first_collect_at",)).fetchone()
+        if not first_state:
+            set_collector_state(conn, "first_collect_at", str(now_ts), now_ts)
         conn.executemany(
             """
             INSERT INTO active_ip_records(user_id, ip, first_seen_at, last_seen_at, last_ttl, source_key)
@@ -1987,6 +2174,7 @@ def upsert_cache_records(cache_path: Path, records: list[tuple[int, str, int, in
         apply_ignored_rules_conn(conn, now_ts)
         conn.execute("DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,))
         set_collector_state(conn, "last_collect_at", str(now_ts), now_ts)
+        set_collector_state(conn, "last_collect_attempt_at", str(now_ts), now_ts)
         set_collector_state(conn, "last_cleanup_at", str(now_ts), now_ts)
     return user_ids
 
@@ -2017,7 +2205,7 @@ def run_cache_collection_once(cfg: AppConfig, cache_path: Path) -> tuple[bool, s
     if isinstance(records, str):
         log.warning("缓存采集 Redis 失败：%s", records)
         return False, records, True, "", 0, 0, 0
-    user_ids = upsert_cache_records(cache_path, records, cfg.cache_retention_days)
+    user_ids = upsert_cache_records(cache_path, records, cache_retention_days_sync(cache_path))
     mysql_ok = True
     mysql_detail = ""
     try:
@@ -2031,7 +2219,12 @@ def run_cache_collection_once(cfg: AppConfig, cache_path: Path) -> tuple[bool, s
     # 默认 collector_interval_seconds=60、ip_geo_queries_per_minute=30，即每轮最多自动查 30 个。
     # 如果短时间新增量超过免费 API 安全速率，剩余 pending 会在后续采集轮次继续自动补全。
     geo_limit = max(1, int(cfg.ip_geo_queries_per_minute * max(5.0, cfg.collector_interval_seconds) / 60))
-    geo_total, geo_success, geo_failed = backfill_geo_pending_once(cache_path, limit=geo_limit)
+    geo_total, geo_success, geo_failed, _ = backfill_geo_pending_rate_limited(
+        cache_path,
+        limit=geo_limit,
+        queries_per_minute=cfg.ip_geo_queries_per_minute,
+        stop_when_rate_limited=True,
+    )
     if geo_total:
         pending_after = cache_geo_status_sync(cache_path)["geo_pending"]
         log.info(
@@ -2474,9 +2667,8 @@ def cache_geo_status_sync(cache_path: Path) -> dict[str, int]:
         geo_pending = int(conn.execute(
             """
             SELECT COUNT(*) FROM ip_geo_cache
-            WHERE queried_at = 0
-               OR country IS NULL OR country = ''
-               OR (region IS NULL AND city IS NULL AND isp IS NULL)
+            WHERE (queried_at IS NULL OR queried_at <= 0)
+              AND (raw IS NULL OR raw = '')
             """
         ).fetchone()[0] or 0)
     return {"active_ips": active_ips, "geo_total": geo_total, "geo_pending": geo_pending}
@@ -2486,9 +2678,8 @@ def pending_geo_ips_sync(cache_path: Path, limit: int | None = None) -> list[str
     init_cache(cache_path)
     sql = """
         SELECT ip FROM ip_geo_cache
-        WHERE queried_at = 0
-           OR country IS NULL OR country = ''
-           OR (region IS NULL AND city IS NULL AND isp IS NULL)
+        WHERE (queried_at IS NULL OR queried_at <= 0)
+          AND (raw IS NULL OR raw = '')
         ORDER BY queried_at ASC, ip ASC
     """
     params: tuple[Any, ...] = ()
@@ -2534,12 +2725,12 @@ def format_bytes(value: int | float | None) -> str:
 
 
 def query_ip_api_sync(ip: str) -> dict[str, Any]:
-    fields = "status,message,country,regionName,city,isp,as,asname,org,query"
+    fields = "status,message,country,countryCode,regionName,city,district,isp,as,asname,org,query"
     url = "http://ip-api.com/json/" + urllib.parse.quote(ip, safe="") + "?" + urllib.parse.urlencode({
         "lang": "zh-CN",
         "fields": fields,
     })
-    req = urllib.request.Request(url, headers={"User-Agent": "xbot/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "xbot"})
     with urllib.request.urlopen(req, timeout=8) as resp:
         raw = resp.read(8192).decode("utf-8", errors="replace")
     data = json.loads(raw)
@@ -2548,18 +2739,89 @@ def query_ip_api_sync(ip: str) -> dict[str, Any]:
     return data
 
 
+def normalize_geo_name(value: Any) -> str:
+    return str(value or "").strip().replace("臺", "台")
+
+
+def geo_text_contains(values: list[str], patterns: list[str]) -> bool:
+    joined = " ".join(values)
+    return any(re.search(pattern, joined, re.IGNORECASE) for pattern in patterns)
+
+
+def normalize_taiwan_city(region: str, city: str, district: str) -> str:
+    county_cities = [
+        "台北市", "新北市", "桃园市", "台中市", "台南市", "高雄市",
+        "基隆市", "新竹市", "嘉义市",
+        "新竹县", "苗栗县", "彰化县", "南投县", "云林县", "嘉义县",
+        "屏东县", "宜兰县", "花莲县", "台东县", "澎湖县", "金门县", "连江县",
+    ]
+    aliases = {
+        "台北": "台北市",
+        "新北": "新北市",
+        "桃园": "桃园市",
+        "台中": "台中市",
+        "台南": "台南市",
+        "高雄": "高雄市",
+        "基隆": "基隆市",
+        "新竹": "新竹市",
+        "嘉义": "嘉义市",
+    }
+    for item in [region, city, district]:
+        name = normalize_geo_name(item)
+        if not name:
+            continue
+        if name in county_cities:
+            return name
+        if name in aliases:
+            return aliases[name]
+    return normalize_geo_name(region or city or district) or "台湾未知城市"
+
+
+def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
+    """Build the normalized city-level area used only for active-area statistics."""
+    country_code = normalize_geo_name(data.get("countryCode")).upper()
+    country = normalize_geo_name(data.get("country"))
+    region = normalize_geo_name(data.get("regionName"))
+    city = normalize_geo_name(data.get("city"))
+    district = normalize_geo_name(data.get("district"))
+    values = [country, region, city, district]
+
+    if country_code == "HK" or geo_text_contains(values, [r"香港", r"Hong\s*Kong"]):
+        return {"key": "HK:香港", "name": "香港", "level": "sar_city"}
+    if country_code == "MO" or geo_text_contains(values, [r"澳门", r"澳門", r"Macau", r"Macao"]):
+        return {"key": "MO:澳门", "name": "澳门", "level": "sar_city"}
+    if country_code == "TW" or geo_text_contains(values, [r"台湾", r"Taiwan"]):
+        stat_name = normalize_taiwan_city(region, city, district)
+        return {"key": f"TW:{stat_name}", "name": stat_name, "level": "tw_city"}
+
+    if country_code == "CN" or country == "中国":
+        municipalities = {"北京市", "上海市", "天津市", "重庆市"}
+        if region in municipalities:
+            return {"key": f"CN:{region}", "name": region, "level": "municipality"}
+        stat_name = city or region or "未知城市"
+        return {"key": f"CN:{region or '未知省份'}:{stat_name}", "name": stat_name, "level": "city"}
+
+    stat_name = city or region or country or "未知地区"
+    return {"key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}", "name": stat_name, "level": "city"}
+
+
 def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any]) -> None:
     now_ts = int(datetime.now().timestamp())
+    stat_area = build_geo_stat_area(data)
     with cache_connect(cache_path) as conn:
         conn.execute(
             """
-            INSERT INTO ip_geo_cache(ip, country, region, city, isp, raw, queried_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO ip_geo_cache(ip, country, region, city, district, isp, stat_area_key, stat_area_name, stat_area_level, raw, queried_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ip) DO UPDATE SET
                 country=excluded.country,
                 region=excluded.region,
                 city=excluded.city,
+                district=excluded.district,
                 isp=excluded.isp,
+                stat_area_key=excluded.stat_area_key,
+                stat_area_name=excluded.stat_area_name,
+                stat_area_level=excluded.stat_area_level,
                 raw=excluded.raw,
                 queried_at=excluded.queried_at
             """,
@@ -2568,7 +2830,11 @@ def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any
                 str(data.get("country") or ""),
                 str(data.get("regionName") or ""),
                 str(data.get("city") or ""),
+                str(data.get("district") or ""),
                 str(data.get("isp") or ""),
+                stat_area["key"],
+                stat_area["name"],
+                stat_area["level"],
                 json.dumps(data, ensure_ascii=False),
                 now_ts,
             ),
@@ -2577,6 +2843,8 @@ def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any
         region = str(data.get("regionName") or "").strip()
         city = str(data.get("city") or "").strip()
         area_keys = []
+        if stat_area.get("key"):
+            area_keys.append(stat_area["key"])
         if city:
             area_keys.append("|".join(part for part in (country, region, city) if part))
         if region:
@@ -2624,6 +2892,13 @@ def raw_geo_data(row: sqlite3.Row) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def row_value(row: sqlite3.Row, name: str) -> Any:
+    try:
+        return row[name]
+    except (KeyError, IndexError):
+        return None
+
+
 def asn_key_from_raw(raw: dict[str, Any]) -> str | None:
     as_text = str(raw.get("as") or "").strip()
     match = re.search(r"\bAS\s*(\d+)\b", as_text, re.IGNORECASE)
@@ -2664,6 +2939,17 @@ def ignored_rule_counts_by_dimension_sync(cache_path: Path) -> dict[str, int]:
     for row in rows:
         counts[str(row["dimension"])] = int(row["c"] or 0)
     return counts
+
+
+def geo_area_rule_label(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return value
+    if "|" in value:
+        return " / ".join(part for part in value.split("|") if part)
+    if ":" in value:
+        return value.split(":")[-1] or value
+    return value
 
 
 def ignored_rules_text_sync(cache_path: Path) -> str:
@@ -2709,7 +2995,7 @@ def ignored_rule_items_sync(cache_path: Path) -> list[dict[str, Any]]:
         dimension = str(row["dimension"] or "")
         value = str(row["value"] or "")
         if dimension == "area":
-            label = " / ".join(value.split("|"))
+            label = geo_area_rule_label(value)
             dim_label = "📍"
         elif dimension == "asn":
             label = asn_labels.get(value, value)
@@ -2729,13 +3015,13 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
         if dimension == "area":
             rows = conn.execute(
                 """
-                SELECT COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) AS display,
-                       g.country, g.region, g.city, MAX(a.last_seen_at) AS last_seen_at,
+                SELECT COALESCE(NULLIF(g.stat_area_name, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) AS display,
+                       g.country, g.region, g.city, g.district, g.stat_area_key, g.stat_area_name, g.stat_area_level, MAX(a.last_seen_at) AS last_seen_at,
                        COUNT(DISTINCT a.ip) AS ip_count, COUNT(DISTINCT a.user_id) AS user_count
                 FROM active_ip_records AS a
                 JOIN ip_geo_cache AS g ON g.ip = a.ip
-                WHERE COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) IS NOT NULL
-                GROUP BY COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')), g.country, g.region, g.city
+                WHERE COALESCE(NULLIF(g.stat_area_key, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) IS NOT NULL
+                GROUP BY COALESCE(NULLIF(g.stat_area_key, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')), g.country, g.region, g.city, g.district, g.stat_area_key, g.stat_area_name, g.stat_area_level
                 ORDER BY last_seen_at DESC, display ASC
                 """
             ).fetchall()
@@ -2744,7 +3030,7 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 key = geo_area_key(row)
                 if not key:
                     continue
-                label = " / ".join(key.split("|"))
+                label = str(row["display"] or "").strip() or geo_area_rule_label(key)
                 items.append({"value": key, "label": label, "sub": f"{int(row['ip_count'] or 0)} IP / {int(row['user_count'] or 0)} 用户", "last_seen_at": int(row["last_seen_at"] or 0)})
             return items
         if dimension == "asn":
@@ -2832,8 +3118,10 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
             SET ignored_at = ?, ignore_reason = 'manual_area', ignore_note = '忽略列表：地区'
             WHERE ignored_at IS NULL AND ip IN (
                 SELECT g.ip FROM ip_geo_cache AS g
-                WHERE COALESCE(NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) IS NOT NULL
+                WHERE COALESCE(NULLIF(g.stat_area_key, ''), NULLIF(g.city, ''), NULLIF(g.region, ''), NULLIF(g.country, '')) IS NOT NULL
                   AND (
+                    NULLIF(g.stat_area_key, '') IN ({placeholders})
+                    OR
                     CASE
                       WHEN NULLIF(g.city, '') IS NOT NULL THEN TRIM(COALESCE(g.country, '') || CASE WHEN COALESCE(g.country, '') != '' THEN '|' ELSE '' END || COALESCE(g.region, '') || CASE WHEN COALESCE(g.region, '') != '' THEN '|' ELSE '' END || COALESCE(g.city, ''))
                       WHEN NULLIF(g.region, '') IS NOT NULL THEN TRIM(COALESCE(g.country, '') || CASE WHEN COALESCE(g.country, '') != '' THEN '|' ELSE '' END || COALESCE(g.region, ''))
@@ -2842,7 +3130,7 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
                   ) IN ({placeholders})
             )
             """,
-            [now_ts, *area_rules],
+            [now_ts, *area_rules, *area_rules],
         )
     asn_rules = {str(row["value"] or "") for row in conn.execute("SELECT value FROM ignored_ip_rules WHERE dimension = 'asn'").fetchall()}
     if asn_rules:
@@ -2930,6 +3218,122 @@ def backfill_geo_pending_once(cache_path: Path, limit: int = 5) -> tuple[int, in
             failed += 1
             update_geo_cache_failure_sync(cache_path, ip, type(exc).__name__)
     return len(ips), success, failed
+
+
+def backfill_geo_pending_rate_limited(
+    cache_path: Path,
+    limit: int,
+    queries_per_minute: int,
+    retry_wait_seconds: float = 65.0,
+    stop_when_rate_limited: bool = True,
+) -> tuple[int, int, int, bool]:
+    """Backfill pending IP geo records at a steady, API-friendly pace.
+
+    Returns (total_selected, success, failed, rate_limited). The sleep happens
+    between requests, not in a burst, so startup will not intentionally drive the
+    free ip-api endpoint into 429 just to finish faster.
+    """
+    ips = pending_geo_ips_sync(cache_path, limit=max(1, int(limit)))
+    if not ips:
+        return 0, 0, 0, False
+    interval = 60.0 / max(1, int(queries_per_minute))
+    success = 0
+    failed = 0
+    rate_limited = False
+    for index, ip in enumerate(ips):
+        started = time.monotonic()
+        try:
+            data = query_ip_api_sync(ip)
+            update_geo_cache_success_sync(cache_path, ip, data)
+            success += 1
+        except urllib.error.HTTPError as exc:
+            failed += 1
+            if exc.code == 429:
+                rate_limited = True
+                log.warning("IP 归属地补全触发 ip-api 限流，等待 %.0f 秒后重试", retry_wait_seconds)
+                time.sleep(max(5.0, retry_wait_seconds))
+                if stop_when_rate_limited:
+                    break
+            else:
+                update_geo_cache_failure_sync(cache_path, ip, f"HTTP {exc.code}")
+        except Exception as exc:
+            failed += 1
+            update_geo_cache_failure_sync(cache_path, ip, type(exc).__name__)
+        if index < len(ips) - 1:
+            elapsed = time.monotonic() - started
+            sleep_for = interval - elapsed
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+    return len(ips), success, failed, rate_limited
+
+
+def backfill_geo_pending_until_complete(cache_path: Path, queries_per_minute: int = 30) -> tuple[int, int, int]:
+    """Backfill all pending geo records before startup decisions/notifications run.
+
+    This is intentionally stricter than the periodic collector: startup with a fresh
+    SQLite database should not evaluate IP alerts or render initial active-region
+    counts while many IPs are still shown as “待查询”. On ip-api rate limiting we
+    wait for the next free-window and continue, instead of starting notification
+    loops with incomplete geo data. It still respects the configured per-minute
+    query pace instead of bursting to the limit.
+    """
+    total = 0
+    success = 0
+    failed = 0
+    queries_per_minute = max(1, int(queries_per_minute))
+    while True:
+        pending = cache_geo_status_sync(cache_path)["geo_pending"]
+        if pending <= 0:
+            break
+        current_total, current_success, current_failed, rate_limited = backfill_geo_pending_rate_limited(
+            cache_path,
+            limit=pending,
+            queries_per_minute=queries_per_minute,
+            stop_when_rate_limited=True,
+        )
+        total += current_total
+        success += current_success
+        failed += current_failed
+        pending_after = cache_geo_status_sync(cache_path)["geo_pending"]
+        log.info(
+            "启动初始化 IP 归属地补全：本轮待处理 %s 个，成功 %s 个，失败 %s 个，剩余 %s 个",
+            current_total, current_success, current_failed, pending_after,
+        )
+        if pending_after <= 0:
+            break
+        if rate_limited:
+            continue
+        if pending_after >= pending or current_success <= 0:
+            log.warning("启动初始化 IP 归属地补全未取得进展，等待 60 秒后重试")
+            time.sleep(60.0)
+    return total, success, failed
+
+
+def initialize_cache_before_notifications_sync(cfg: AppConfig, cache_path: Path) -> tuple[bool, str, bool, str, int, int, int]:
+    """Collect active IPs and finish geo lookup before starting judgment/notification loops."""
+    init_cache(cache_path)
+    records = collect_redis_ip_records_sync(cfg.redis)
+    if isinstance(records, str):
+        log.warning("启动初始化缓存采集 Redis 失败：%s", records)
+        return False, records, True, "", 0, 0, 0
+    user_ids = upsert_cache_records(cache_path, records, cache_retention_days_sync(cache_path))
+    mysql_ok = True
+    mysql_detail = ""
+    try:
+        upsert_cache_users(cache_path, cfg.mysql, user_ids)
+    except MySQLError as exc:
+        log.warning("启动初始化缓存采集 MySQL 用户信息失败：%s", exc)
+        mysql_ok = False
+        mysql_detail = f"{type(exc).__name__}: {exc}"
+    geo_total, geo_success, geo_failed = backfill_geo_pending_until_complete(
+        cache_path,
+        queries_per_minute=max(1, int(cfg.ip_geo_queries_per_minute)),
+    )
+    log.info(
+        "启动初始化缓存采集完成：Redis IP 记录 %s 条，用户 %s 个，归属地待处理 %s 个，成功 %s 个，失败 %s 个",
+        len(records), len(user_ids), geo_total, geo_success, geo_failed,
+    )
+    return True, "", mysql_ok, mysql_detail, geo_total, geo_success, geo_failed
 
 def mysql_connect(cfg: MySQLConfig):
     """Create a MySQL connection used only for SELECT queries in this app."""
@@ -3092,8 +3496,9 @@ def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int,
     delta_rows = 0
     gap_seconds = 0
     previous_ts = 0
-    # 保留足够长的分钟级增量样本，用于后续 7 天 / 30 天统计；同时尊重人工设置的统计起始点。
-    retention_cutoff_ts = int((datetime.now() - timedelta(days=32)).timestamp())
+    # 保留周期由 Bot 参数配置管理；同时尊重人工设置的统计起始点。
+    retention_days = cache_retention_days_sync(cache_path)
+    retention_cutoff_ts = cache_retention_cutoff_ts(retention_days)
     stats_floor_ts = get_stats_floor_ts_sync(cache_path)
     cutoff_ts = max(retention_cutoff_ts, stats_floor_ts or 0)
     with cache_connect(cache_path) as conn:
@@ -3613,7 +4018,8 @@ def bot_health_overview_text_sync(cfg: AppConfig, cache_path: Path, admin_view: 
     uptime_seconds = int((datetime.now() - PROCESS_STARTED_AT).total_seconds())
     collect_state = get_collector_state_sync(cache_path, "last_collect_at")
     traffic_state = get_collector_state_sync(cache_path, "last_traffic_sample_at")
-    first_collect_at = earliest_cache_collect_at_sync(cache_path)
+    first_collect_state = get_collector_state_sync(cache_path, "first_collect_at")
+    first_collect_at = first_collect_state[1] if first_collect_state else earliest_cache_collect_at_sync(cache_path)
     first_traffic_at = earliest_traffic_sample_at_sync(cache_path)
     connection_lines, _, _, sqlite_ok = connection_check_lines_sync(cfg, cache_path)
     if not admin_view:
@@ -3726,7 +4132,7 @@ def bot_status_text_sync(cfg: AppConfig, cache_path: Path) -> str:
 
 
 def geo_text(row: sqlite3.Row) -> str:
-    raw_parts = [str(row[name] or "").strip() for name in ("country", "region", "city", "isp")]
+    raw_parts = [str(row_value(row, name) or "").strip() for name in ("country", "region", "city", "district", "isp")]
     parts: list[str] = []
     for part in raw_parts:
         if part and part not in parts:
@@ -3735,7 +4141,7 @@ def geo_text(row: sqlite3.Row) -> str:
 
 
 def geo_location_text(row: sqlite3.Row) -> str:
-    raw_parts = [str(row[name] or "").strip() for name in ("country", "region", "city")]
+    raw_parts = [str(row_value(row, name) or "").strip() for name in ("country", "region", "city", "district")]
     parts: list[str] = []
     for part in raw_parts:
         if part and part not in parts:
@@ -3757,9 +4163,17 @@ def safe_autolink_text(value: str) -> str:
 
 def geo_area_key(row: sqlite3.Row) -> str | None:
     """Return a city-level area key for de-duplicated active area counting."""
-    country = str(row["country"] or "").strip()
-    region = str(row["region"] or "").strip()
-    city = str(row["city"] or "").strip()
+    stat_area_key = str(row_value(row, "stat_area_key") or "").strip()
+    if stat_area_key:
+        return stat_area_key
+    raw = raw_geo_data(row)
+    if raw:
+        stat_area = build_geo_stat_area(raw)
+        if stat_area.get("key"):
+            return stat_area["key"]
+    country = str(row_value(row, "country") or "").strip()
+    region = str(row_value(row, "region") or "").strip()
+    city = str(row_value(row, "city") or "").strip()
     if city:
         return "|".join(part for part in (country, region, city) if part)
     if region:
@@ -3812,7 +4226,7 @@ def cached_active_user_rows_between(
         rows = conn.execute(
             """
             SELECT a.user_id, a.ip, a.last_seen_at, u.display_name,
-                   g.country, g.region, g.city, g.isp, g.raw
+                   g.country, g.region, g.city, g.district, g.isp, g.stat_area_key, g.stat_area_name, g.stat_area_level, g.raw
             FROM active_ip_records AS a
             LEFT JOIN users AS u ON u.user_id = a.user_id
             LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
@@ -4040,7 +4454,7 @@ def query_user_ips_from_cache_sync(
         user_row = conn.execute("SELECT display_name FROM users WHERE user_id = ?", (xboard_user_id,)).fetchone()
         rows = conn.execute(
             """
-            SELECT a.ip, a.last_seen_at, g.country, g.region, g.city, g.isp, g.raw
+            SELECT a.ip, a.last_seen_at, g.country, g.region, g.city, g.district, g.isp, g.stat_area_key, g.stat_area_name, g.stat_area_level, g.raw
             FROM active_ip_records AS a
             LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
             WHERE a.user_id = ? AND a.ignored_at IS NULL
@@ -4094,7 +4508,7 @@ def user_ip_page_rows_sync(
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
             """
-            SELECT a.ip, a.last_seen_at, g.country, g.region, g.city, g.isp, g.raw
+            SELECT a.ip, a.last_seen_at, g.country, g.region, g.city, g.district, g.isp, g.stat_area_key, g.stat_area_name, g.stat_area_level, g.raw
             FROM active_ip_records AS a
             LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
             WHERE a.user_id = ? AND a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
@@ -4273,7 +4687,7 @@ async def edit_or_replace_status_any(
             await update.effective_message.reply_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
 
 
-def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Application:
+def build_application(cfg: AppConfig, cache_path: Path) -> Application:
     app = Application.builder().token(cfg.telegram.bot_token).build()
 
     def back_close_row(back_callback: str = "main_menu", back_text: str = "⬅️ 返回主菜单") -> list[InlineKeyboardButton]:
@@ -4297,7 +4711,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
             lines.append(f"🎩 普通用户：{html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
         if admin_id is None and not cfg.telegram.manager_user_ids and not cfg.telegram.authorized_user_ids:
             lines.append("暂无授权用户。")
-        lines.extend(["", "说明：超级管理员只能通过配置文件修改；普通管理员由超级管理员在 Bot 内管理。"])
+        lines.extend(["", "说明：超级管理员只能通过环境变量修改；普通管理员由超级管理员在 Bot 内管理。"])
         return "\n".join(lines)
 
     async def resolve_telegram_user_label(uid: int) -> str:
@@ -4319,6 +4733,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
         "ip_ignore": "IP 忽略调整",
         "reset_cache": "重置缓存",
         "reset_ip": "重置 IP 记录",
+        "parameter_config": "参数配置",
         "auth": "授权管理",
     }
 
@@ -4335,6 +4750,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
             [button("🚧 IP 忽略调整", "ip_ignore")],
             [button("🧹 重置缓存", "reset_cache")],
             [button("👤 重置 IP 记录", "reset_ip")],
+            [button("🎨 参数配置", "parameter_config")],
             [button("🔑 授权管理", "auth")],
             [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
         ]
@@ -4372,6 +4788,9 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
         },
         "reset_ip": {
             "重置特定用户 IP 记录": "👤",
+        },
+        "parameter_config": {
+            "调整缓存保留时间": "🗄",
         },
     }
 
@@ -4792,7 +5211,54 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 自定题图", callback_data="main_menu:parameter_config:cover")],
             [InlineKeyboardButton("🏷 自定昵称", callback_data="main_menu:parameter_config:nickname")],
+            [InlineKeyboardButton("🗄 缓存保留时间", callback_data="main_menu:parameter_config:cache_retention")],
             back_close_row(),
+        ])
+
+    def cache_retention_keyboard(selected_days: int | None = None) -> InlineKeyboardMarkup:
+        selected_days = cache_retention_days_sync(cache_path) if selected_days is None else selected_days
+        rows = []
+        for option_key, (days, label) in CACHE_RETENTION_OPTIONS.items():
+            mark = "✅ " if int(days) == int(selected_days) else ""
+            rows.append([InlineKeyboardButton(f"{mark}{label}", callback_data=f"main_menu:parameter_config:cache_retention_select:{option_key}")])
+        rows.append(back_close_row("main_menu:parameter_config", "⬅️ 返回参数配置"))
+        return InlineKeyboardMarkup(rows)
+
+    def cache_retention_confirm_keyboard(option_key: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ 确认并清理", callback_data=f"main_menu:parameter_config:cache_retention_confirm:{option_key}")],
+            [InlineKeyboardButton("⬅️ 返回选择", callback_data="main_menu:parameter_config:cache_retention"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
+        ])
+
+    def cache_retention_text_sync() -> str:
+        days = cache_retention_days_sync(cache_path)
+        return "\n".join([
+            "🗄 <b>缓存保留时间</b>",
+            "────────────",
+            f"当前设置：<b>{html.escape(cache_retention_label(days))}</b>",
+            "",
+            "说明：超过保留时间的 Bot 本地缓存会自动清理；选择新周期并确认后，会立即删除超出期限的老缓存记录。",
+            "不会修改 XBoard / MySQL / Redis。",
+        ])
+
+    def cache_retention_preview_text(option_key: str, preview: dict[str, int]) -> str:
+        days, label = CACHE_RETENTION_OPTIONS[option_key]
+        cutoff = int(preview.get("cutoff_ts") or 0)
+        cutoff_text = "不限制，保留全部历史" if cutoff <= 0 else format_timestamp(cutoff)
+        return "\n".join([
+            "⚠️ <b>确认缓存保留时间</b>",
+            "────────────",
+            f"新设置：<b>{html.escape(label)}</b>",
+            f"清理边界：<code>{html.escape(cutoff_text)}</code>",
+            "",
+            "将删除以下超期本地缓存：",
+            f"• 活跃 IP 记录：<b>{int(preview.get('active_ip_records') or 0)}</b> 条",
+            f"• IP 归属地缓存：<b>{int(preview.get('ip_geo_cache') or 0)}</b> 条",
+            f"• 流量分钟样本：<b>{int(preview.get('traffic_delta_samples') or 0)}</b> 条",
+            f"• 采样中断记录：<b>{int(preview.get('traffic_sample_gaps') or 0)}</b> 条",
+            f"• 自定义范围：<b>{int(preview.get('traffic_ranges') or 0)}</b> 条",
+            "",
+            "确认后立即生效。",
         ])
 
     def notification_push_keyboard(chat_id: str, is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -6137,7 +6603,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
                     return
                 target_uid = int(role_toggle_match.group(1))
                 if target_uid == cfg.telegram.admin_user_id:
-                    await query.answer("超级管理员只能通过配置文件修改", show_alert=True)
+                    await query.answer("超级管理员只能通过环境变量修改", show_alert=True)
                     return
                 current_role = "manager" if target_uid in cfg.telegram.manager_user_ids else "user"
                 role_changes = context.user_data.get("auth_role_changes") or {}
@@ -6165,13 +6631,13 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
                 demote_ids = {int(uid) for uid, role in role_changes.items() if role == "user"}
                 before_managers = sorted(cfg.telegram.manager_user_ids)
                 before_users = sorted(cfg.telegram.authorized_user_ids)
-                await asyncio.to_thread(update_telegram_roles_in_config_sync, config_path, promote_manager_user_ids=promote_ids, demote_manager_user_ids=demote_ids)
+                await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, promote_manager_user_ids=promote_ids, demote_manager_user_ids=demote_ids)
                 after_managers = sorted((set(before_managers) | promote_ids) - demote_ids)
                 after_users = sorted((set(before_users) | demote_ids) - promote_ids)
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
                 context.user_data.pop("auth_role_changes", None)
                 await query.answer("权限变更已保存")
-                await show_callback_page(query, "✅ 权限变更已保存。\n配置已保存，Bot 会自动重新加载。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "✅ 权限变更已保存。\n变更已保存。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
                 return
             if data == "main_menu:auth:delete":
                 context.user_data["auth_delete_selected"] = set()
@@ -6220,13 +6686,13 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
                 before_users = sorted(cfg.telegram.authorized_user_ids)
                 remove_manager_ids = user_ids & cfg.telegram.manager_user_ids
                 remove_user_ids = user_ids & cfg.telegram.authorized_user_ids
-                await asyncio.to_thread(update_telegram_roles_in_config_sync, config_path, remove_authorized_user_ids=remove_user_ids, remove_manager_user_ids=remove_manager_ids)
+                await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, remove_authorized_user_ids=remove_user_ids, remove_manager_user_ids=remove_manager_ids)
                 after_managers = [uid for uid in before_managers if uid not in remove_manager_ids]
                 after_users = [uid for uid in before_users if uid not in remove_user_ids]
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
                 context.user_data.pop("auth_delete_selected", None)
                 await query.answer("授权已删除")
-                await show_callback_page(query, "✅ 已删除所选授权用户。\n配置已保存，Bot 会自动重新加载。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "✅ 已删除所选授权用户。\n变更已保存。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
                 return
 
         if data == "main_menu:clear_history":
@@ -6442,6 +6908,49 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
         if data == "main_menu:parameter_config":
             await query.answer()
             await show_callback_page(query, "🎨 参数配置\n────────────\n请选择要配置的面板参数。", parameter_config_keyboard())
+            return
+
+        if data == "main_menu:parameter_config:cache_retention":
+            await query.answer()
+            await show_callback_page(query, cache_retention_text_sync(), cache_retention_keyboard(), parse_mode="HTML")
+            return
+
+        retention_select_match = re.fullmatch(r"main_menu:parameter_config:cache_retention_select:(1m|1q|1y|all)", data)
+        if retention_select_match:
+            option_key = retention_select_match.group(1)
+            days, _ = CACHE_RETENTION_OPTIONS[option_key]
+            preview = await asyncio.to_thread(cache_retention_preview_sync, cache_path, days)
+            await query.answer()
+            await show_callback_page(query, cache_retention_preview_text(option_key, preview), cache_retention_confirm_keyboard(option_key), parse_mode="HTML")
+            return
+
+        retention_confirm_match = re.fullmatch(r"main_menu:parameter_config:cache_retention_confirm:(1m|1q|1y|all)", data)
+        if retention_confirm_match:
+            option_key = retention_confirm_match.group(1)
+            days, label = CACHE_RETENTION_OPTIONS[option_key]
+            stats = await asyncio.to_thread(cache_retention_set_and_prune_sync, cache_path, days)
+            await asyncio.to_thread(
+                log_operation_from_query,
+                query,
+                "parameter_config",
+                "调整缓存保留时间",
+                f"设置：{label}\n活跃 IP 记录：{stats['active_ip_records']} 条\nIP 归属地缓存：{stats['ip_geo_cache']} 条\n流量分钟样本：{stats['traffic_delta_samples']} 条",
+            )
+            await query.answer("缓存保留时间已更新")
+            await show_callback_page(
+                query,
+                "✅ <b>缓存保留时间已更新</b>\n"
+                "────────────\n"
+                f"当前设置：<b>{html.escape(label)}</b>\n\n"
+                "本次已清理：\n"
+                f"• 活跃 IP 记录：<b>{int(stats.get('active_ip_records') or 0)}</b> 条\n"
+                f"• IP 归属地缓存：<b>{int(stats.get('ip_geo_cache') or 0)}</b> 条\n"
+                f"• 流量分钟样本：<b>{int(stats.get('traffic_delta_samples') or 0)}</b> 条\n"
+                f"• 采样中断记录：<b>{int(stats.get('traffic_sample_gaps') or 0)}</b> 条\n"
+                f"• 自定义范围：<b>{int(stats.get('traffic_ranges') or 0)}</b> 条",
+                cache_retention_keyboard(days),
+                parse_mode="HTML",
+            )
             return
 
         if data == "main_menu:debug_tools":
@@ -7249,7 +7758,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
                     return
                 label = await resolve_telegram_user_label(target_uid)
                 before_users = sorted(cfg.telegram.authorized_user_ids)
-                await asyncio.to_thread(update_authorized_users_in_config_sync, config_path, target_uid, None)
+                await asyncio.to_thread(update_authorized_users_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, target_uid, None)
                 after_users = sorted(set(before_users) | {target_uid})
                 await asyncio.to_thread(log_operation_from_update, update, "auth", "增加授权", f"修改前：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后：{', '.join(str(uid) for uid in after_users) or '空'}\n新增：{target_uid}")
             except ValueError as exc:
@@ -7257,11 +7766,11 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
                 return
             except Exception as exc:
                 log.exception("写入授权用户失败：%s", exc)
-                await reply_and_track("写入配置失败，请检查配置文件权限。", reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)))
+                await reply_and_track("写入授权失败，请检查运行状态。", reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)))
                 return
             context.user_data.pop("awaiting_auth_add_user_id", None)
             await reply_and_track(
-                f"✅ 已增加授权：{html.escape(label)} (<code>{target_uid}</code>)\n配置已保存，Bot 会自动重新加载。",
+                f"✅ 已增加授权：{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
                 parse_mode="HTML",
                 reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
             )
@@ -7518,7 +8027,7 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
     app.add_handler(CommandHandler("traffic_users", traffic_users))
     app.add_handler(CommandHandler("traffic_nodes", traffic_nodes))
     app.add_handler(CallbackQueryHandler(version_update_callback, pattern=r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$"))
-    app.add_handler(CallbackQueryHandler(main_menu_callback, pattern=r"^main_menu(?::(clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
+    app.add_handler(CallbackQueryHandler(main_menu_callback, pattern=r"^main_menu(?::(clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
     app.add_handler(CallbackQueryHandler(alert_callback, pattern=r"^(alert_menu:(?:traffic|ip)|alert_period_page:(?:traffic|ip):\d+|alert_global_period_page:(?:traffic|ip)|alert_global:(?:traffic|ip)(?::(?:custom|period:(?:1h|24h|7d|today|week)))?|alert_users:(?:traffic|ip):\d+|alert_user:(?:traffic|ip):\d+(?::alert)?|alert_set:(?:traffic|ip):(?:custom:\d+|period:(?:1h|24h|7d|today|week):\d+|threshold:\d+:\d+|whitelist:\d+|reset:\d+))$"))
     app.add_handler(CallbackQueryHandler(traffic_daily_callback, pattern=r"^(traffic_menu(?::[A-Za-z0-9_]+)?|traffic_back:[A-Za-z0-9_]+|traffic_(?:period|switch):(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(?:users|nodes))?|ip_custom:start|traffic_custom:(start(?::(?:combined|users|nodes))?|now|(year|month|day|hour|minute):\d+|back:(year|month|day|hour))|traffic_floor:(start|confirm:\d+)|traffic_dashboard:(pin|unpin|delete):[A-Za-z0-9_]+)$"))
     app.add_handler(CallbackQueryHandler(active_users_callback, pattern=r"^(active_users(?::|_query:)(1h|24h|7d|30d)(?::\d+)?|ip_user_query:(?:(1h|24h|7d|30d)|custom:\d+:\d+)|user_ip_page:\d+:\d+:(?:all|(?:1h|24h|7d|30d)|custom:\d+:\d+)|active_user_detail:(1h|24h|7d|30d):\d+|active_users_cancel:(1h|24h|7d|30d)|noop)$"))
@@ -7529,51 +8038,14 @@ def build_application(cfg: AppConfig, cache_path: Path, config_path: Path) -> Ap
     return app
 
 
-async def wait_for_config_change(
-    path: Path,
-    current_signature: str,
-    interval: float,
-    stop_event: asyncio.Event,
-) -> AppConfig | None:
-    """Block until config changes, stop is requested, or a valid new config appears."""
-    while not stop_event.is_set():
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval)
-            return None
-        except asyncio.TimeoutError:
-            pass
-
-        try:
-            new_signature = file_signature(path)
-        except Exception as exc:
-            log.error("读取配置文件失败，继续使用当前配置：%s", exc)
-            continue
-
-        if new_signature == current_signature:
-            continue
-
-        try:
-            new_cfg = load_config(path)
-        except Exception as exc:
-            log.error("配置文件已变化，但新配置无效，继续使用当前配置：%s", exc)
-            current_signature = new_signature
-            continue
-
-        log.info("检测到配置文件变化，准备重新加载服务")
-        return new_cfg
-    return None
-
-
 async def run_once(
     cfg: AppConfig,
-    config_path: Path,
-    signature: str,
     stop_event: asyncio.Event,
-) -> AppConfig | None:
-    cache_path = resolve_cache_path(cfg.cache_path, config_path.parent)
+) -> None:
+    cache_path = resolve_cache_path(cfg.cache_path, APP_DIR)
     init_cache(cache_path)
 
-    app = build_application(cfg, cache_path, config_path)
+    app = build_application(cfg, cache_path)
     collector_stop_event = asyncio.Event()
     collector_task: asyncio.Task[Any] | None = None
     sampler_stop_event = asyncio.Event()
@@ -7590,6 +8062,15 @@ async def run_once(
     await app.start()
     if not app.updater:
         raise RuntimeError("Telegram updater 初始化失败")
+    redis_ok, redis_detail, mysql_ok, mysql_detail, geo_total, geo_success, geo_failed = await asyncio.to_thread(initialize_cache_before_notifications_sync, cfg, cache_path)
+    await notify_collector_health_transition(app, cfg, cache_path, "redis", redis_ok, redis_detail or "Redis 缓存采集已恢复成功。")
+    if redis_ok or mysql_detail:
+        await notify_collector_health_transition(app, cfg, cache_path, "mysql", mysql_ok, mysql_detail or "MySQL 用户信息采集已恢复成功。")
+    if geo_success:
+        await notify_collector_health_transition(app, cfg, cache_path, "ip_api", True, "IP-API 已恢复响应，启动初始化已完成 IP 归属地补全。")
+    elif geo_failed:
+        await notify_collector_health_transition(app, cfg, cache_path, "ip_api", False, f"启动初始化 IP 归属地补全失败 {geo_failed} 个。")
+    await check_ip_alerts(app, cfg, cache_path)
     await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     await cleanup_legacy_traffic_dashboard_messages(app, cache_path)
     collector_task = asyncio.create_task(cache_collector_loop(app, cfg, cache_path, collector_stop_event))
@@ -7598,15 +8079,11 @@ async def run_once(
     report_task = asyncio.create_task(traffic_report_push_loop(app, cache_path, report_stop_event))
     version_task = asyncio.create_task(version_update_check_loop(app, cfg, cache_path, version_stop_event))
     await send_update_result_notice(app)
-    log.info("Telegram Bot 已启动，配置文件：%s；缓存文件：%s", config_path, cache_path)
+    log.info("Telegram Bot 已启动，缓存文件：%s", cache_path)
 
     try:
-        return await wait_for_config_change(
-            config_path,
-            signature,
-            cfg.config_watch_interval_seconds,
-            stop_event,
-        )
+        await stop_event.wait()
+        return None
     finally:
         log.info("正在停止 Telegram Bot 和缓存采集任务...")
         collector_stop_event.set()
@@ -7645,18 +8122,18 @@ async def run_once(
         log.info("Telegram Bot 已停止")
 
 
-async def serve(config_path: Path) -> None:
+async def serve() -> None:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
-    cfg = load_config(config_path)
-    signature = file_signature(config_path)
+    cfg = build_config_from_env()
 
     while not stop_event.is_set():
         try:
-            next_cfg = await run_once(cfg, config_path, signature, stop_event)
+            await run_once(cfg, stop_event)
+            break
         except Exception as exc:
             log.exception("服务运行异常：%s", exc)
             if stop_event.is_set():
@@ -7666,24 +8143,12 @@ async def serve(config_path: Path) -> None:
                 await asyncio.wait_for(stop_event.wait(), timeout=5)
                 break
             except asyncio.TimeoutError:
-                cfg = load_config(config_path)
-                signature = file_signature(config_path)
+                cfg = build_config_from_env()
                 continue
-
-        if next_cfg is None:
-            break
-        cfg = next_cfg
-        signature = file_signature(config_path)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Xbot Telegram Monitor Bot")
-    parser.add_argument(
-        "-c",
-        "--config",
-        default="config.yaml",
-        help="配置文件路径，默认：./config.yaml",
-    )
     return parser.parse_args()
 
 
@@ -7692,9 +8157,8 @@ def main() -> None:
     # 避免 httpx 在日志中输出 Telegram Bot Token 所在的完整请求 URL。
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    args = parse_args()
-    config_path = Path(args.config).expanduser().resolve()
-    asyncio.run(serve(config_path))
+    parse_args()
+    asyncio.run(serve())
 
 
 if __name__ == "__main__":

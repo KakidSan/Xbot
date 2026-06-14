@@ -25,3 +25,17 @@ bot_push_only_frontend_*.md
 frontend*.md
 xbot-text-topology.md
 build_frontend_texts_current.py
+
+.xbot.pid
+
+# Local secrets / runtime state
+.env
+.env.*
+!.env.example
+xbot.pid
+.xbot.pid
+.last-docker-migration-backup
+
+# Local generated backups / scratch artifacts
+bot.py.bak-*
+__pycache__/

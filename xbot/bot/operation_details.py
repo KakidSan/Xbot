@@ -18,7 +18,7 @@ def alert_type_label(alert_type: str) -> str:
 
 def alert_setting_before_after_detail(alert_type: str, scope: str, before: str, after: str, xboard_user_id: int | None = None) -> str:
     target = f"XBoard 用户 {xboard_user_id}" if xboard_user_id is not None else "默认规则"
-    return f"对象：{target}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"
+    return f"对象：{target}\n范围：{scope}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"
 
 
 def auth_change_detail(

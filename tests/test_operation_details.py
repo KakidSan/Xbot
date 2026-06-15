@@ -17,12 +17,13 @@ class OperationDetailsTest(unittest.TestCase):
         self.assertEqual(alert_type_label("ip"), "IP 监控")
         self.assertEqual(
             alert_setting_before_after_detail("traffic", "默认规则", "旧", "新"),
-            "对象：默认规则\n类型：流量告警\n修改前：旧\n修改后：新",
+            "对象：默认规则\n范围：默认规则\n类型：流量告警\n修改前：旧\n修改后：新",
         )
         self.assertEqual(
             alert_setting_before_after_detail("ip", "独立规则", "旧", "新", 123),
-            "对象：XBoard 用户 123\n类型：IP 监控\n修改前：旧\n修改后：新",
+            "对象：XBoard 用户 123\n范围：独立规则\n类型：IP 监控\n修改前：旧\n修改后：新",
         )
+        self.assertIn("范围：白名单", alert_setting_before_after_detail("traffic", "白名单", "关", "开", 123))
 
     def test_auth_change_detail_formats_empty_added_and_deleted_users(self) -> None:
         self.assertEqual(

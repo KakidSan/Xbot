@@ -170,8 +170,7 @@ def operation_log_detail_text_sync(cache_path: Path, log_id: int) -> str:
     category = str(row.get("category") or "")
     label = OPERATION_LOG_CATEGORIES.get(category, category or "操作日志")
     ts = datetime.fromtimestamp(int(row.get("created_at") or 0), BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    actor_name = html.escape(str(row.get("actor_name") or "未知用户"))
-    actor = actor_name
+    actor = html.escape(str(row.get("actor_name") or "未知用户"))
     raw_action = str(row.get("action") or "")
     action = html.escape(operation_log_action_label(category, raw_action))
     detail = html.escape(operation_log_detail_display_text(cache_path, category, str(row.get("detail") or "")))
@@ -203,16 +202,3 @@ def log_operation_from_query(cache_path: Path, query: Any, category: str, action
 def log_operation_from_update(cache_path: Path, update: Update, category: str, action: str, detail: str = "") -> None:
     user = update.effective_user
     operation_log_add_sync(cache_path, getattr(user, "id", None), actor_name_from_user(user), category, action, detail)
-
-
-def alert_category(alert_type: str) -> str:
-    return "traffic_alert" if alert_type == "traffic" else "ip_alert"
-
-
-def alert_type_label(alert_type: str) -> str:
-    return "流量告警" if alert_type == "traffic" else "IP 监控"
-
-
-def alert_setting_before_after_detail(alert_type: str, scope: str, before: str, after: str, xboard_user_id: int | None = None) -> str:
-    target = f"XBoard 用户 {xboard_user_id}" if xboard_user_id is not None else "默认规则"
-    return f"对象：{target}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"

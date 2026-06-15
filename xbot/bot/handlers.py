@@ -53,8 +53,6 @@ from .authorization import (
 )
 from .context import BotContext
 from .operation_logs import (
-    alert_category,
-    alert_setting_before_after_detail,
     log_operation_from_query as log_operation_from_query_with_cache,
     log_operation_from_update as log_operation_from_update_with_cache,
     operation_log_detail_keyboard,
@@ -63,6 +61,7 @@ from .operation_logs import (
     operation_logs_menu_keyboard,
     operation_logs_summary_keyboard,
 )
+from .operation_details import alert_category, alert_setting_before_after_detail, auth_change_detail, ip_ignore_detail
 from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 from ..db.cache import (
     active_user_button_items_from_cache_sync,
@@ -1890,7 +1889,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 cfg.telegram.authorized_user_ids = new_users
                 after_managers = sorted(new_managers)
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
+                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "权限变更", auth_change_detail(before_managers, after_managers, before_users, after_users))
                 context.user_data.pop("auth_role_changes", None)
                 await query.answer("权限变更已保存")
                 await show_callback_page(query, "✅ 权限变更已保存。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
@@ -1947,7 +1946,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 cfg.telegram.authorized_user_ids = new_users
                 after_managers = sorted(new_managers)
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
+                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "删除授权", auth_change_detail(before_managers, after_managers, before_users, after_users, deleted_user_ids=user_ids))
                 context.user_data.pop("auth_delete_selected", None)
                 await query.answer("授权已删除")
                 await show_callback_page(query, "✅ 已删除所选授权用户。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
@@ -2105,7 +2104,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "解除忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "解除忽略", ip_ignore_detail(dimension, value, before_values, after_values))
             await query.answer("已解除忽略")
             await show_callback_page(
                 query,
@@ -2143,7 +2142,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", ip_ignore_detail(dimension, value, before_values, after_values))
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -2668,7 +2667,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, ignore_value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", ip_ignore_detail(dimension, ignore_value, before_values, after_values, xboard_user_id=xboard_user_id))
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -2700,7 +2699,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, ignore_value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", ip_ignore_detail(dimension, ignore_value, before_values, after_values, xboard_user_id=xboard_user_id))
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -3037,7 +3036,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 new_users = await asyncio.to_thread(update_authorized_users_in_cache_sync, cache_path, cfg.telegram.super_admin_user_ids, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, target_uid, None)
                 cfg.telegram.authorized_user_ids = new_users
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, "auth", "增加授权", f"修改前：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后：{', '.join(str(uid) for uid in after_users) or '空'}\n新增：{target_uid}")
+                await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, "auth", "增加授权", auth_change_detail([], [], before_users, after_users, added_user_id=target_uid))
             except ValueError as exc:
                 await reply_cover_card(
                     update,

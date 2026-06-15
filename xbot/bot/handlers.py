@@ -244,12 +244,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
         ]
 
-    def telegram_user_label_sync(uid: int) -> str:
-        return telegram_user_label_from_cache(cache_path, uid)
-
-    def telegram_authorization_list_text_sync() -> str:
-        return telegram_authorization_list_text_for_cfg(cfg, cache_path)
-
     async def resolve_telegram_user_label(uid: int) -> str:
         try:
             chat = await app.bot.get_chat(uid)
@@ -334,9 +328,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         icon = OPERATION_LOG_ACTION_ICONS.get(category, {}).get(action)
         return f"{icon} {action}" if icon and not action.startswith(icon) else action
 
-    def auth_user_ids_to_labels(value: str) -> str:
-        return auth_user_ids_to_labels_from_cache(cache_path, value)
-
     def xboard_user_label_sync(uid: int) -> str:
         return render_user_label(uid, cached_user_name_by_id(cache_path, uid))
 
@@ -370,7 +361,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 continue
             key, value = line.split("：", 1)
             if category == "auth" and key in auth_user_list_fields:
-                converted.append(f"{key}：{auth_user_ids_to_labels(value)}")
+                converted.append(f"{key}：{auth_user_ids_to_labels_from_cache(bot_ctx.cache_path, value)}")
             elif key in xboard_user_fields:
                 converted.append(f"{key}：{xboard_user_ids_to_labels(value)}")
             else:
@@ -451,21 +442,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
     def alert_setting_before_after_detail(alert_type: str, scope: str, before: str, after: str, xboard_user_id: int | None = None) -> str:
         target = f"XBoard 用户 {xboard_user_id}" if xboard_user_id is not None else "默认规则"
         return f"对象：{target}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"
-
-    def authorization_manage_keyboard(super_admin: bool = False) -> InlineKeyboardMarkup:
-        return authorization_manage_keyboard_for_cfg(super_admin)
-
-    def authorization_delete_keyboard(context: ContextTypes.DEFAULT_TYPE, super_admin: bool = False) -> InlineKeyboardMarkup:
-        return authorization_delete_keyboard_for_cfg(cfg, cache_path, context, super_admin)
-
-    def authorization_delete_confirm_keyboard() -> InlineKeyboardMarkup:
-        return authorization_delete_confirm_keyboard_for_cfg()
-
-    def authorization_role_change_text(context: ContextTypes.DEFAULT_TYPE) -> str:
-        return authorization_role_change_text_for_cfg(cfg, cache_path, context)
-
-    def authorization_role_change_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-        return authorization_role_change_keyboard_for_cfg(cfg, cache_path, context)
 
     def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         rows = [
@@ -1174,17 +1150,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             reply_markup=clear_history_confirm_keyboard(),
         )
         await track_auto_delete_message(sent)
-
-    async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await handle_version_command(
-            update,
-            context,
-            bot_ctx,
-            reply_cover_card,
-            edit_or_replace_status_any,
-            delete_trigger_command_message,
-            reply_connection_status,
-        )
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -1968,14 +1933,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
 
-    async def version_update_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await handle_version_update_callback(
-            update,
-            context,
-            bot_ctx,
-            show_callback_page,
-            answer_callback_silently,
-        )
     async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not query or not query.message:
@@ -2053,7 +2010,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 for target_uid in sorted(cfg.telegram.allowed_user_ids):
                     await resolve_telegram_user_label(target_uid)
                 await answer_callback_silently(query)
-                await show_callback_page(query, await asyncio.to_thread(telegram_authorization_list_text_sync), authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, await asyncio.to_thread(telegram_authorization_list_text_for_cfg, bot_ctx.cfg, bot_ctx.cache_path), authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
                 return
             if data == "main_menu:auth:add":
                 context.user_data["awaiting_auth_add_user_id"] = {"chat_id": query.message.chat_id, "message_id": query.message.message_id}
@@ -2066,7 +2023,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     return
                 context.user_data["auth_role_changes"] = {}
                 await answer_callback_silently(query)
-                await show_callback_page(query, authorization_role_change_text(context), authorization_role_change_keyboard(context), parse_mode="HTML")
+                await show_callback_page(query, authorization_role_change_text_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context), authorization_role_change_keyboard_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context), parse_mode="HTML")
                 return
             role_toggle_match = re.fullmatch(r"main_menu:auth:role_toggle:(\d+)", data)
             if role_toggle_match:
@@ -2089,7 +2046,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     role_changes[target_uid] = next_role
                 context.user_data["auth_role_changes"] = role_changes
                 await query.answer("已切换，保存后生效")
-                await show_callback_page(query, authorization_role_change_text(context), authorization_role_change_keyboard(context), parse_mode="HTML")
+                await show_callback_page(query, authorization_role_change_text_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context), authorization_role_change_keyboard_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context), parse_mode="HTML")
                 return
             if data == "main_menu:auth:role_save":
                 if not is_super_admin:
@@ -2111,13 +2068,13 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
                 context.user_data.pop("auth_role_changes", None)
                 await query.answer("权限变更已保存")
-                await show_callback_page(query, "✅ 权限变更已保存。\n变更已保存。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "✅ 权限变更已保存。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
                 return
             if data == "main_menu:auth:delete":
                 context.user_data["auth_delete_selected"] = set()
                 await answer_callback_silently(query)
                 delete_hint = "请选择要删除授权的用户。\n超级管理员不可通过 Bot 删除。" if is_super_admin else "请选择要删除授权的普通用户。\n普通管理员不可删除管理员。"
-                await show_callback_page(query, "🔓 <b>删除授权</b>\n────────────\n" + delete_hint, authorization_delete_keyboard(context, is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "🔓 <b>删除授权</b>\n────────────\n" + delete_hint, authorization_delete_keyboard_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context, is_super_admin), parse_mode="HTML")
                 return
             toggle_match = re.fullmatch(r"main_menu:auth:del_toggle:(\d+)", data)
             if toggle_match:
@@ -2132,7 +2089,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 context.user_data["auth_delete_selected"] = selected
                 await query.answer("已更新选择")
                 delete_hint = "请选择要删除授权的用户。\n超级管理员不可通过 Bot 删除。" if is_super_admin else "请选择要删除授权的普通用户。\n普通管理员不可删除管理员。"
-                await show_callback_page(query, "🔓 <b>删除授权</b>\n────────────\n" + delete_hint, authorization_delete_keyboard(context, is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "🔓 <b>删除授权</b>\n────────────\n" + delete_hint, authorization_delete_keyboard_for_cfg(bot_ctx.cfg, bot_ctx.cache_path, context, is_super_admin), parse_mode="HTML")
                 return
             if data == "main_menu:auth:del_done":
                 selected = context.user_data.get("auth_delete_selected") or set()
@@ -2145,7 +2102,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     emoji = "👑" if target_uid in cfg.telegram.manager_user_ids else "🎩"
                     lines.append(f"{emoji} {html.escape(await resolve_telegram_user_label(target_uid))} (<code>{target_uid}</code>)")
                 await answer_callback_silently(query)
-                await show_callback_page(query, "\n".join(lines), authorization_delete_confirm_keyboard(), parse_mode="HTML")
+                await show_callback_page(query, "\n".join(lines), authorization_delete_confirm_keyboard_for_cfg(), parse_mode="HTML")
                 return
             if data == "main_menu:auth:del_confirm":
                 selected = context.user_data.get("auth_delete_selected") or set()
@@ -2168,7 +2125,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
                 context.user_data.pop("auth_delete_selected", None)
                 await query.answer("授权已删除")
-                await show_callback_page(query, "✅ 已删除所选授权用户。\n变更已保存。", authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
+                await show_callback_page(query, "✅ 已删除所选授权用户。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
                 return
 
         if data == "main_menu:clear_history":
@@ -3246,7 +3203,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                         update,
                         context,
                         "🔐 <b>增加授权</b>\n────────────\n该用户已是管理员，无需重复授权。",
-                        authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                        authorization_manage_keyboard_for_cfg(is_super_admin_user_id(user_id(update), bot_ctx.cfg)),
                     )
                     return
                 label = await resolve_telegram_user_label(target_uid)
@@ -3260,7 +3217,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     update,
                     context,
                     f"🔐 <b>增加授权</b>\n────────────\n{html.escape(str(exc))}",
-                    authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                    authorization_manage_keyboard_for_cfg(is_super_admin_user_id(user_id(update), bot_ctx.cfg)),
                 )
                 return
             except Exception as exc:
@@ -3269,7 +3226,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     update,
                     context,
                     "🔐 <b>增加授权</b>\n────────────\n写入授权失败，请检查运行状态。",
-                    authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                    authorization_manage_keyboard_for_cfg(is_super_admin_user_id(user_id(update), bot_ctx.cfg)),
                 )
                 return
             context.user_data.pop("awaiting_auth_add_user_id", None)
@@ -3277,7 +3234,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 update,
                 context,
                 f"✅ <b>已增加授权</b>\n────────────\n{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
-                authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                authorization_manage_keyboard_for_cfg(is_super_admin_user_id(user_id(update), bot_ctx.cfg)),
             )
             try:
                 await context_bot_delete_message(update.effective_message.chat_id, update.effective_message.message_id)
@@ -3532,7 +3489,18 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear_history", clear_history_command))
-    app.add_handler(CommandHandler("version", version_command))
+    app.add_handler(CommandHandler(
+        "version",
+        lambda update, context: handle_version_command(
+            update,
+            context,
+            bot_ctx,
+            reply_cover_card,
+            edit_or_replace_status_any,
+            delete_trigger_command_message,
+            reply_connection_status,
+        ),
+    ))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("health", health_command))
     app.add_handler(CommandHandler("active_users", active_users))
@@ -3540,7 +3508,16 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
     app.add_handler(CommandHandler("traffic_daily", traffic_daily))
     app.add_handler(CommandHandler("traffic_users", traffic_users))
     app.add_handler(CommandHandler("traffic_nodes", traffic_nodes))
-    app.add_handler(CallbackQueryHandler(version_update_callback, pattern=r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$"))
+    app.add_handler(CallbackQueryHandler(
+        lambda update, context: handle_version_update_callback(
+            update,
+            context,
+            bot_ctx,
+            show_callback_page,
+            answer_callback_silently,
+        ),
+        pattern=r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$",
+    ))
     app.add_handler(CallbackQueryHandler(main_menu_callback, pattern=r"^main_menu(?::(init_ack|clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
     app.add_handler(CallbackQueryHandler(alert_callback, pattern=r"^(alert_menu:(?:traffic|ip)|alert_period_page:(?:traffic|ip):\d+|alert_global_period_page:(?:traffic|ip)|alert_global:(?:traffic|ip)(?::(?:custom|period:(?:1h|24h|7d|today|week)))?|alert_users:(?:traffic|ip):\d+|alert_user:(?:traffic|ip):\d+(?::alert)?|alert_set:(?:traffic|ip):(?:custom:\d+|period:(?:1h|24h|7d|today|week):\d+|threshold:\d+:\d+|whitelist:\d+|reset:\d+))$"))
     app.add_handler(CallbackQueryHandler(traffic_daily_callback, pattern=r"^(traffic_menu(?::[A-Za-z0-9_]+)?|traffic_back:[A-Za-z0-9_]+|traffic_(?:period|switch):(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(?:users|nodes))?|ip_custom:start|traffic_custom:(start(?::(?:combined|users|nodes))?|now|(year|month|day|hour|minute):\d+|back:(year|month|day|hour))|traffic_floor:(start|confirm:\d+)|traffic_dashboard:(pin|unpin|delete):[A-Za-z0-9_]+)$"))

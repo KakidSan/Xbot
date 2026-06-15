@@ -26,7 +26,6 @@ from ..common import (
     datetime,
     field,
     filters,
-    hashlib,
     html,
     ip_range_kind,
     is_admin_user_id,
@@ -105,8 +104,6 @@ from ..db.cache import (
     count_user_ips_from_cache_sync,
     format_timestamp,
     geo_area_key,
-    ignored_list_items_sync,
-    ignored_rule_items_sync,
     ignored_rule_toggle_sync,
     ignored_rule_values_sync,
     init_cache,
@@ -142,7 +139,6 @@ from ..db.cache import (
     update_authorized_users_in_cache_sync,
     update_telegram_roles_in_cache_sync,
     upsert_all_cache_users,
-    user_ip_ignore_items_sync,
 )
 from ..geo import ignored_rules_text_sync
 from ..alerts import check_ip_alerts
@@ -181,18 +177,24 @@ from .keyboards import (
     reset_user_ip_select_keyboard,
     alert_user_setting_keyboard_for_source,
     detail_keyboard,
+    ignored_rules_keyboard,
     ip_alert_keyboard,
+    ip_ignore_list_keyboard,
     ip_detail_list_keyboard,
     traffic_custom_available_bounds,
     traffic_custom_day_keyboard,
+    traffic_custom_keyboard_for_state,
     traffic_custom_hour_keyboard,
     traffic_custom_minute_keyboard,
     traffic_custom_month_keyboard,
     traffic_custom_single_year,
     traffic_custom_year_keyboard,
+    traffic_floor_confirm_keyboard,
     traffic_dashboard_keyboard,
     traffic_period_keyboard,
     user_ip_detail_keyboard,
+    user_ip_ignore_dimension_keyboard,
+    user_ip_ignore_list_keyboard,
     user_ip_query_page_keyboard,
 )
 
@@ -297,123 +299,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         except Exception:
             cached = await asyncio.to_thread(ui_pref_get_sync, cache_path, uid, "telegram_label")
             return str(cached or f"用户 {uid}")
-
-    def ignored_rules_keyboard(context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> InlineKeyboardMarkup:
-        items = ignored_rule_items_sync(cache_path)
-        token_map = context.user_data.setdefault("ip_ignore_tokens", {})
-        if not isinstance(token_map, dict):
-            token_map = {}
-            context.user_data["ip_ignore_tokens"] = token_map
-        page_size = 10
-        total_pages = max(1, (len(items) + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        rows: list[list[InlineKeyboardButton]] = []
-        for item in items[page * page_size:(page + 1) * page_size]:
-            token = hashlib.sha1(f"rule:{item['dimension']}:{item['value']}".encode("utf-8")).hexdigest()[:12]
-            token_map[token] = {"dimension": str(item["dimension"]), "value": str(item["value"])}
-            label = f"✅ {item['sub']} {item['label']}"
-            rows.append([InlineKeyboardButton(label[:64], callback_data=f"main_menu:ip_monitor:ignored_rule_toggle:{page}:{token}")])
-        if len(items) > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"main_menu:ip_monitor:ignored_rules:{page - 1}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="main_menu:noop"))
-            if page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"main_menu:ip_monitor:ignored_rules:{page + 1}"))
-            rows.append(nav_row)
-        if not rows:
-            rows.append([InlineKeyboardButton("当前暂无忽略内容", callback_data="main_menu:noop")])
-        rows.append(back_close_row("main_menu:ip_monitor:ignore", "⬅️ 返回忽略列表"))
-        return InlineKeyboardMarkup(rows)
-
-    def ip_ignore_list_keyboard(context: ContextTypes.DEFAULT_TYPE, dimension: str, page: int = 0) -> InlineKeyboardMarkup:
-        items = ignored_list_items_sync(cache_path, dimension)
-        selected = ignored_rule_values_sync(cache_path, dimension)
-        token_map = context.user_data.setdefault("ip_ignore_tokens", {})
-        if not isinstance(token_map, dict):
-            token_map = {}
-            context.user_data["ip_ignore_tokens"] = token_map
-        page_size = 10
-        total_pages = max(1, (len(items) + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        rows: list[list[InlineKeyboardButton]] = []
-        for item in items[page * page_size:(page + 1) * page_size]:
-            token = hashlib.sha1(f"{dimension}:{item['value']}".encode("utf-8")).hexdigest()[:12]
-            token_map[token] = {"dimension": dimension, "value": str(item["value"])}
-            prefix = "✅ " if str(item["value"]) in selected else ""
-            label = f"{prefix}{item['label']}"
-            sub = str(item.get("sub") or "")
-            if sub:
-                label = f"{label} · {sub}"
-            rows.append([InlineKeyboardButton(label[:64], callback_data=f"main_menu:ip_monitor:ignore_toggle:{dimension}:{page}:{token}")])
-        if len(items) > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"main_menu:ip_monitor:ignore:{dimension}:{page - 1}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-            if page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"main_menu:ip_monitor:ignore:{dimension}:{page + 1}"))
-            rows.append(nav_row)
-        if not rows:
-            rows.append([InlineKeyboardButton("暂无已采集信息", callback_data="main_menu:noop")])
-        rows.append(back_close_row("main_menu:ip_monitor:ignore", "⬅️ 返回忽略列表"))
-        return InlineKeyboardMarkup(rows)
-
-    def user_ip_ignore_dimension_keyboard(kind: str, xboard_user_id: int, page: int = 0, source: str | None = None) -> InlineKeyboardMarkup:
-        suffix = f":{source}" if source else ""
-        back_button = InlineKeyboardButton("⬅️ 返回通知", callback_data=f"ip_alert_notice:{xboard_user_id}") if source == "alert" else InlineKeyboardButton("⬅️ 返回详情", callback_data=f"ip_active_user_detail:{kind}:{xboard_user_id}:{page}{suffix}")
-        return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("忽略地区", callback_data=f"ip_ignore_page:area:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-                InlineKeyboardButton("忽略 ASN", callback_data=f"ip_ignore_page:asn:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-                InlineKeyboardButton("忽略 IP", callback_data=f"ip_ignore_page:cidr:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-            ],
-            [back_button, InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
-    def user_ip_ignore_list_keyboard(context: ContextTypes.DEFAULT_TYPE, dimension: str, kind: str, xboard_user_id: int, detail_page: int, list_page: int = 0, source: str | None = None) -> InlineKeyboardMarkup:
-        items = user_ip_ignore_items_sync(cache_path, xboard_user_id, kind, detail_page, dimension)
-        selected = ignored_rule_values_sync(cache_path, dimension)
-        token_map = context.user_data.setdefault("ip_ignore_tokens", {})
-        if not isinstance(token_map, dict):
-            token_map = {}
-            context.user_data["ip_ignore_tokens"] = token_map
-        page_size = 10
-        total_pages = max(1, (len(items) + page_size - 1) // page_size)
-        list_page = min(max(list_page, 0), total_pages - 1)
-        suffix = f":{source}" if source else ""
-        rows: list[list[InlineKeyboardButton]] = []
-        for item in items[list_page * page_size:(list_page + 1) * page_size]:
-            token = hashlib.sha1(f"{dimension}:{item['value']}".encode("utf-8")).hexdigest()[:12]
-            token_map[token] = {"dimension": dimension, "value": str(item["value"])}
-            prefix = "✅ " if str(item["value"]) in selected else ""
-            label = f"{prefix}{item['label']}"
-            if item.get("sub"):
-                label = f"{label} · {item['sub']}"
-            route_token = hashlib.sha1(f"route:{dimension}:{kind}:{xboard_user_id}:{detail_page}:{list_page}:{token}:{source or ''}".encode("utf-8")).hexdigest()[:12]
-            token_map[route_token] = {
-                "dimension": dimension,
-                "value": str(item["value"]),
-                "kind": kind,
-                "user_id": int(xboard_user_id),
-                "detail_page": int(detail_page),
-                "list_page": int(list_page),
-                "source": source or "",
-            }
-            rows.append([InlineKeyboardButton(label[:64], callback_data=f"ip_ig_t:{route_token}")])
-        if len(items) > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if list_page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"ip_ignore_page:{dimension}:{kind}:{xboard_user_id}:{detail_page}:{list_page - 1}{suffix}"))
-            nav_row.append(InlineKeyboardButton(f"{list_page + 1}/{total_pages}", callback_data="noop"))
-            if list_page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"ip_ignore_page:{dimension}:{kind}:{xboard_user_id}:{detail_page}:{list_page + 1}{suffix}"))
-            rows.append(nav_row)
-        if not rows:
-            rows.append([InlineKeyboardButton("当前列表暂无可忽略项", callback_data="noop")])
-        back_button = InlineKeyboardButton("⬅️ 返回通知", callback_data=f"ip_alert_notice:{xboard_user_id}") if source == "alert" else InlineKeyboardButton("⬅️ 返回忽略类型", callback_data=f"ip_ignore_menu:{kind}:{xboard_user_id}:{detail_page}{suffix}")
-        rows.append([back_button, InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
 
     def cache_retention_text_sync() -> str:
         days = cache_retention_days_sync(cache_path)
@@ -874,32 +759,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             lines.append(f"已选结束：{selected_combo_text()}")
         return "\n".join(lines)
 
-    def traffic_floor_confirm_keyboard(floor_ts: int) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ 确认调整起始点", callback_data=f"traffic_floor:confirm:{floor_ts}")],
-            [InlineKeyboardButton("🔄 重新选择", callback_data="traffic_floor:start"), InlineKeyboardButton("❎ 取消", callback_data="main_menu")],
-        ])
-
-    def traffic_custom_keyboard_for_state(state: dict[str, Any]) -> InlineKeyboardMarkup:
-        step = state.get("step", "year")
-        year = int(state.get("year") or 0)
-        month = int(state.get("month") or 0)
-        day = int(state.get("day") or 0)
-        hour = int(state.get("hour") or 0)
-        mode = str(state.get("mode") or "")
-        dimension = str(state.get("dimension") or "combined")
-        if step == "month" and year:
-            include_now = state.get("phase") == "end" and state.get("mode") in {"custom", "ip_custom"} and traffic_custom_single_year(cache_path)
-            return traffic_custom_month_keyboard(cache_path, year, include_now=include_now, mode=mode, dimension=dimension)
-        if step == "day" and year and month:
-            return traffic_custom_day_keyboard(cache_path, year, month, mode=mode, dimension=dimension)
-        if step == "hour" and year and month and day:
-            return traffic_custom_hour_keyboard(cache_path, year, month, day, mode=mode, dimension=dimension)
-        if step == "minute" and year and month and day:
-            return traffic_custom_minute_keyboard(cache_path, year, month, day, hour, mode=mode, dimension=dimension)
-        include_now = state.get("phase") == "end" and state.get("step") == "year" and state.get("mode") in {"custom", "ip_custom"}
-        return traffic_custom_year_keyboard(cache_path, mode, include_now=include_now, dimension=dimension)
-
     def traffic_fixed_range(kind: str) -> tuple[int, int, str] | None:
         now = datetime.now()
         if kind == "today":
@@ -1034,7 +893,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state.update({"mode": "ip_custom", "phase": "start"})
             traffic_custom_enter_initial_step(state)
             await answer_callback_silently(query)
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
+            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
             return
 
         traffic_custom_start_match = re.fullmatch(r"traffic_custom:start(?::(combined|users|nodes))?", data)
@@ -1045,7 +904,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state.update({"mode": "custom", "dimension": dimension, "phase": "start"})
             traffic_custom_enter_initial_step(state)
             await answer_callback_silently(query)
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
+            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
             return
 
         if data == "traffic_floor:start":
@@ -1119,7 +978,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if next_step:
                 state["step"] = next_step
                 await answer_callback_silently(query)
-                await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
+                await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
                 return
 
             year = int(state.get("year") or 0)
@@ -1153,7 +1012,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 state.update({"phase": "end"})
                 traffic_custom_enter_initial_step(state)
                 await query.answer("开始时间已选择")
-                await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
+                await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
                 return
             state["end_ts"] = selected_ts
             start_ts = int(state.get("start_ts") or 0)
@@ -1188,7 +1047,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 state.pop(key, None)
             state["step"] = target
             await answer_callback_silently(query)
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
+            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
             return
 
         match = re.fullmatch(r"traffic_dashboard:(pin|unpin|delete):([A-Za-z0-9_]+)", data)
@@ -1558,7 +1417,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 ignored_rules_text_sync(cache_path),
-                ignored_rules_keyboard(context, page),
+                ignored_rules_keyboard(cache_path, context, page),
                 parse_mode="HTML",
             )
             return
@@ -1585,7 +1444,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 ignored_rules_text_sync(cache_path),
-                ignored_rules_keyboard(context, page),
+                ignored_rules_keyboard(cache_path, context, page),
                 parse_mode="HTML",
             )
             return
@@ -1599,7 +1458,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n按已采集信息去重展示，并按最近出现时间排序。\n点击按钮可切换忽略状态；前缀 ✅ 表示已忽略。",
-                ip_ignore_list_keyboard(context, dimension, page),
+                ip_ignore_list_keyboard(cache_path, context, dimension, page),
                 parse_mode="HTML",
             )
             return
@@ -1624,7 +1483,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n按已采集信息去重展示，并按最近出现时间排序。\n点击按钮可切换忽略状态；前缀 ✅ 表示已忽略。",
-                ip_ignore_list_keyboard(context, dimension, page),
+                ip_ignore_list_keyboard(cache_path, context, dimension, page),
                 parse_mode="HTML",
             )
             return
@@ -2114,7 +1973,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n已从当前页面的活跃 IP 中去重生成按钮。\n点击可切换忽略状态；前缀 ✅ 表示已忽略。",
-                user_ip_ignore_list_keyboard(context, dimension, kind, xboard_user_id, detail_page, list_page, source),
+                user_ip_ignore_list_keyboard(cache_path, context, dimension, kind, xboard_user_id, detail_page, list_page, source),
                 parse_mode="HTML",
                 auto_delete=(source != "alert"),
             )
@@ -2149,7 +2008,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n已从当前页面的活跃 IP 中去重生成按钮。\n点击可切换忽略状态；前缀 ✅ 表示已忽略。",
-                user_ip_ignore_list_keyboard(context, dimension, kind, xboard_user_id, detail_page, list_page, source),
+                user_ip_ignore_list_keyboard(cache_path, context, dimension, kind, xboard_user_id, detail_page, list_page, source),
                 parse_mode="HTML",
                 auto_delete=(source != "alert"),
             )
@@ -2181,7 +2040,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n已从当前页面的活跃 IP 中去重生成按钮。\n点击可切换忽略状态；前缀 ✅ 表示已忽略。",
-                user_ip_ignore_list_keyboard(context, dimension, kind, xboard_user_id, detail_page, list_page, source),
+                user_ip_ignore_list_keyboard(cache_path, context, dimension, kind, xboard_user_id, detail_page, list_page, source),
                 parse_mode="HTML",
                 auto_delete=(source != "alert"),
             )

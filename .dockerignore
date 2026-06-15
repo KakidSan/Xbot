@@ -31,3 +31,7 @@ xbot-text-topology.md
 .env
 .env.*
 !.env.example
+backups/
+.last-fresh-restart-backup
+xbot.pid
+.xbot.pid

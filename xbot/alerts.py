@@ -1,6 +1,9 @@
 from __future__ import annotations
-from ._bootstrap import install_module_symbols
+
 from .common import *
+from .db.cache import *
+from .bot.formatters import *
+from .bot.keyboards import ip_alert_keyboard
 
 def alert_period_window(period: str | None, now: datetime | None = None) -> tuple[int, int, str]:
     now = now or datetime.now()
@@ -71,6 +74,13 @@ async def check_traffic_alerts(app: Application, cfg: AppConfig, cache_path: Pat
     alert_state_set_sync(cache_path, "traffic_alert_active_users", json.dumps(sorted(current)))
 
 async def check_ip_alerts(app: Application, cfg: AppConfig, cache_path: Path) -> None:
+    init_status = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
+    if init_status.get("initializing"):
+        log.info(
+            "IP 告警检查等待初始化完成：活跃 IP %s 条，归属地待查询 %s 条",
+            init_status.get("active_ips"), init_status.get("geo_pending"),
+        )
+        return
     rows = ip_alert_rows_sync(cache_path)
     current = {int(row["user_id"]): row for row in rows}
     previous_raw = alert_state_get_sync(cache_path, "ip_alert_active_users") or "{}"
@@ -99,6 +109,5 @@ async def check_ip_alerts(app: Application, cfg: AppConfig, cache_path: Path) ->
         row = {"user_id": user_id, "name": cached_user_name_by_id(cache_path, user_id) or f"用户{user_id}", "city_count": city_count, "threshold": threshold, "period": period, "period_label": period_label, "cities": cities, "rule_type": rule_type}
         await send_user_alert_to_chats(app, basic_or_advanced_chats, format_ip_alert(row, recovered=True, previous_city_count=previous.get(user_id)))
     alert_state_set_sync(cache_path, "ip_alert_active_users", json.dumps({str(user_id): int(row.get("city_count") or 0) for user_id, row in current.items()}, sort_keys=True))
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
+
 from ..common import *
 
 def ip_alert_keyboard(row: dict[str, Any]) -> InlineKeyboardMarkup:
@@ -43,6 +43,5 @@ def traffic_dashboard_keyboard_static(kind: str, is_pinned: bool = False) -> Inl
         InlineKeyboardButton("❌ 关闭", callback_data=f"traffic_dashboard:delete:{kind}"),
     ])
     return InlineKeyboardMarkup(rows)
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

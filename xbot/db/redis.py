@@ -1,5 +1,5 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
+
 from ..common import *
 
 ONLINE_IP_KEY_SPECS: tuple[tuple[str, str, str], ...] = (
@@ -204,6 +204,5 @@ def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int,
     finally:
         client.close()
     return records
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

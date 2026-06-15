@@ -1,6 +1,16 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
+
 from ..common import *
+from ..config import *
+from ..db.cache import *
+from ..db.redis import *
+from ..db.mysql import *
+from ..geo import *
+from ..alerts import *
+from ..collector import *
+from ..updater import *
+from .formatters import *
+from .keyboards import *
 
 def user_id(update: Update) -> int | None:
     return update.effective_user.id if update.effective_user else None
@@ -21,7 +31,7 @@ def is_allowed(update: Update, cfg: AppConfig) -> bool:
     return uid is not None and uid in cfg.telegram.allowed_user_ids
 
 def is_super_admin_user_id(uid: int | None, cfg: AppConfig) -> bool:
-    return uid is not None and cfg.telegram.admin_user_id is not None and uid == cfg.telegram.admin_user_id
+    return uid is not None and uid in cfg.telegram.super_admin_user_ids
 
 def is_admin_user_id(uid: int | None, cfg: AppConfig) -> bool:
     return uid is not None and uid in cfg.telegram.admin_user_ids
@@ -108,16 +118,16 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
     def telegram_authorization_list_text_sync() -> str:
         lines = ["🔑 <b>授权管理</b>", "────────────", "当前用户列表："]
-        admin_id = cfg.telegram.admin_user_id
-        if admin_id is not None:
-            lines.append(f"👑 超级管理员：<b>{html.escape(telegram_user_label_sync(admin_id))}</b> (<code>{admin_id}</code>)")
+        super_admin_ids = sorted(cfg.telegram.super_admin_user_ids)
+        for uid in super_admin_ids:
+            lines.append(f"• 👑 <b>{html.escape(telegram_user_label_sync(uid))}</b> (<code>{uid}</code>)")
         for uid in sorted(cfg.telegram.manager_user_ids):
-            lines.append(f"👑 普通管理员：{html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
+            lines.append(f"• 👑 {html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
         for uid in sorted(cfg.telegram.authorized_user_ids):
-            lines.append(f"🎩 普通用户：{html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
-        if admin_id is None and not cfg.telegram.manager_user_ids and not cfg.telegram.authorized_user_ids:
+            lines.append(f"• 🎩 {html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
+        if not super_admin_ids and not cfg.telegram.manager_user_ids and not cfg.telegram.authorized_user_ids:
             lines.append("暂无授权用户。")
-        lines.extend(["", "说明：超级管理员只能通过环境变量修改；普通管理员由超级管理员在 Bot 内管理。"])
+        lines.extend(["", "说明：超级管理员只能通过环境变量修改。"])
         return "\n".join(lines)
 
     async def resolve_telegram_user_label(uid: int) -> str:
@@ -931,6 +941,24 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if auto_delete:
                 await track_auto_delete_message(sent)
 
+    async def show_initialization_gate(query) -> bool:
+        init_status = await asyncio.to_thread(initialization_status_sync, cache_path, cfg.ip_geo_queries_per_minute)
+        if not init_status.get("initializing"):
+            return False
+        await answer_callback_silently(query)
+        text = await asyncio.to_thread(initialization_progress_text_sync, cache_path, cfg)
+        if init_status.get("awaiting_ack"):
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 进入主菜单", callback_data="main_menu:init_ack")]])
+        else:
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 刷新初始化进度", callback_data="main_menu")]])
+        await show_callback_page(
+            query,
+            text,
+            keyboard,
+            parse_mode="HTML",
+        )
+        return True
+
     async def purge_chat_history(chat_id: int | str, from_message_id: int) -> tuple[int, int]:
         deleted = 0
         failed = 0
@@ -957,10 +985,38 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         except Exception:
             return False
 
+    async def answer_callback_silently(query: CallbackQuery) -> None:
+        try:
+            await query.answer()
+        except BadRequest as exc:
+            if "Query is too old" in str(exc) or "query id is invalid" in str(exc):
+                log.debug("忽略已过期 callback 确认：%s", exc)
+                return
+            raise
+
+    async def delete_trigger_command_message(update: Update) -> None:
+        message = update.effective_message
+        if not message:
+            return
+        try:
+            await context_bot_delete_message(message.chat_id, message.message_id)
+        except Exception:
+            pass
+
     async def send_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
         uid = user_id(update)
+        init_status = await asyncio.to_thread(initialization_status_sync, cache_path, cfg.ip_geo_queries_per_minute)
+        if init_status.get("initializing"):
+            text = await asyncio.to_thread(initialization_progress_text_sync, cache_path, cfg)
+            sent = await update.effective_message.reply_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 进入主菜单", callback_data="main_menu:init_ack")]] if init_status.get("awaiting_ack") else [[InlineKeyboardButton("🔄 刷新初始化进度", callback_data="main_menu")]]),
+            )
+            await track_auto_delete_message(sent)
+            return
         custom_name = await asyncio.to_thread(ui_pref_get_sync, cache_path, uid, "nickname") if uid is not None else None
         custom_cover = await asyncio.to_thread(ui_pref_get_sync, cache_path, uid, "cover_file_id") if uid is not None else None
         text = start_menu_text(update, custom_name)
@@ -1054,6 +1110,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply_main_menu(update, context, cfg)
+        await delete_trigger_command_message(update)
 
     async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -1086,21 +1143,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             status_message = await reply_cover_card(update, context, "正在读取当前版本，请稍候...")
             check = {"current": read_app_version()}
         await edit_or_replace_status_any(status_message, version_text(check, admin_view=is_admin), update, parse_mode="HTML", reply_markup=version_keyboard(check, admin_view=is_admin))
-
-    async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message:
-            return
-        if not is_allowed(update, cfg):
-            if is_bot_self_update(update, cfg):
-                return
-            await reply_connection_status(update, cfg)
-            return
-        sent = await update.effective_message.reply_text(
-            proxy_protocol_help_text(),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ 关闭", callback_data="close_message")]]),
-        )
-        await track_auto_delete_message(sent)
+        await delete_trigger_command_message(update)
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -1349,6 +1392,12 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         await show_callback_page(query, text, reply_markup, parse_mode="HTML")
         await asyncio.to_thread(pinned_dashboard_set_sync, cache_path, kind, chat_id, query.message.message_id, is_pinned)
         await asyncio.to_thread(auto_delete_message_set_sync, cache_path, chat_id, query.message.message_id, is_pinned)
+
+    async def open_dashboard_card(query: Any, kind: str) -> None:
+        if not query.message:
+            return
+        sender = getattr(query, "from_user", None)
+        await send_dashboard_card(query.message, kind, sender.id if sender else None)
 
     def traffic_custom_state(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
         state = context.user_data.setdefault("traffic_custom", {})
@@ -1603,13 +1652,13 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
     async def open_traffic_dashboard_message(query: Any, kind: str) -> None:
         if not query.message:
             return
-        await query.answer("正在生成查询...")
+        await query.answer("正在生成查询，请稍候...")
         await send_or_jump_traffic_dashboard(query.message, kind)
 
     async def switch_traffic_dashboard_message(query: Any, kind: str) -> None:
         if not query.message:
             return
-        await query.answer("正在切换周期...")
+        await query.answer("正在切换周期，请稍候...")
         await edit_dashboard_card(query, kind)
 
     async def traffic_daily_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1621,19 +1670,21 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             await query.answer("未授权", show_alert=True)
             return
+        if await show_initialization_gate(query):
+            return
         data = query.data or ""
 
         menu_match = re.fullmatch(r"traffic_menu(?::([A-Za-z0-9_]+))?", data)
         if menu_match:
             source_kind = menu_match.group(1)
             dimension = traffic_dimension_from_kind(source_kind or "combined")
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, "🌊 请选择统计周期：", traffic_period_keyboard(dimension, source_kind))
             return
 
         back_match = re.fullmatch(r"traffic_back:([A-Za-z0-9_]+)", data)
         if back_match:
-            await query.answer()
+            await answer_callback_silently(query)
             await edit_dashboard_card(query, back_match.group(1))
             return
 
@@ -1676,7 +1727,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state.clear()
             state.update({"mode": "ip_custom", "phase": "start"})
             traffic_custom_enter_initial_step(state)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
             return
 
@@ -1687,7 +1738,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state.clear()
             state.update({"mode": "custom", "dimension": dimension, "phase": "start"})
             traffic_custom_enter_initial_step(state)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
             return
 
@@ -1695,7 +1746,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state = traffic_custom_state(context)
             state.clear()
             state.update({"mode": "floor", "phase": "floor", "step": "year"})
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_year_keyboard(str(state.get("mode") or "")))
             return
 
@@ -1744,7 +1795,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             dimension = str(state.get("dimension") or "combined")
             state.clear()
             if mode == "ip_custom":
-                await query.answer("正在生成查询...")
+                await query.answer("正在生成查询，请稍候...")
                 await send_dashboard_card(query.message, ip_range_kind(start_ts, end_ts), query.from_user.id)
                 return
             base_kind = make_range_kind(start_ts, end_ts, label)
@@ -1761,7 +1812,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             next_step = {"year": "month", "month": "day", "day": "hour", "hour": "minute"}.get(field)
             if next_step:
                 state["step"] = next_step
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
                 return
 
@@ -1775,7 +1826,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             selected_ts = int(datetime(year, month, day, hour, minute, second).timestamp())
             if state.get("mode") == "floor":
                 preview = await asyncio.to_thread(preview_prune_stats_before_sync, cache_path, selected_ts)
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(
                     query,
                     "⚠️ 请确认调整起始点\n\n"
@@ -1809,7 +1860,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             dimension = str(state.get("dimension") or "combined")
             state.clear()
             if mode == "ip_custom":
-                await query.answer("正在生成查询...")
+                await query.answer("正在生成查询，请稍候...")
                 await send_dashboard_card(query.message, ip_range_kind(start_ts, end_ts), query.from_user.id)
                 return
             base_kind = make_range_kind(start_ts, end_ts, label)
@@ -1830,7 +1881,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             for key in cleanup:
                 state.pop(key, None)
             state["step"] = target
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(state))
             return
 
@@ -1895,7 +1946,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         m = re.fullmatch(r"version_update:start:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
         if m:
             target = m.group(1)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, update_started_text(target), update_confirm_keyboard(target), parse_mode="HTML")
             return
         m = re.fullmatch(r"version_update:confirm:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
@@ -1932,15 +1983,28 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             await query.answer("未授权，无法使用该功能", show_alert=True)
             return
-
         data = query.data or ""
+        if data == "main_menu:init_ack":
+            await asyncio.to_thread(initialization_acknowledge_sync, cache_path)
+            await query.answer("初始化已确认")
+            if query.message:
+                try:
+                    await query.message.delete()
+                except Exception as exc:
+                    log.warning("删除初始化确认消息失败，继续发送主菜单：%s", exc)
+                update._effective_message = query.message
+                await send_start_menu(update, context)
+            return
+        elif await show_initialization_gate(query):
+            return
+
         sections = {
             "main_menu:status_notice": "💬 通知推送",
             "main_menu:debug_tools": "🧪 调试功能",
         }
 
         if data == "main_menu":
-            await query.answer()
+            await answer_callback_silently(query)
             user = query.from_user
             custom_name = await asyncio.to_thread(ui_pref_get_sync, cache_path, user.id, "nickname")
             tg_name = html.escape(str(custom_name or user.full_name or user.username or user.id))
@@ -1954,7 +2018,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await query.answer("只有管理员可以查看操作日志", show_alert=True)
                 return
             if data == "main_menu:op_logs":
-                await query.answer()
+                await answer_callback_silently(query)
                 keyboard = await asyncio.to_thread(operation_logs_menu_keyboard, query.from_user.id)
                 await show_callback_page(query, "📜 <b>操作日志</b>\n────────────\n请选择要查看的操作类型。\n\n按钮括号为：未读日志数量/所有日志数量。", keyboard, parse_mode="HTML")
                 return
@@ -1969,7 +2033,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             log_match = re.fullmatch(r"main_menu:op_logs:(traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|auth)", data)
             if log_match:
                 category = log_match.group(1)
-                await query.answer()
+                await answer_callback_silently(query)
                 text = await asyncio.to_thread(operation_log_summary_text_sync, category, query.from_user.id)
                 keyboard = await asyncio.to_thread(operation_logs_summary_keyboard, category, query.from_user.id)
                 await show_callback_page(query, text, keyboard, parse_mode="HTML")
@@ -1986,12 +2050,12 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 context.user_data.pop("auth_role_changes", None)
                 for target_uid in sorted(cfg.telegram.allowed_user_ids):
                     await resolve_telegram_user_label(target_uid)
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, await asyncio.to_thread(telegram_authorization_list_text_sync), authorization_manage_keyboard(is_super_admin), parse_mode="HTML")
                 return
             if data == "main_menu:auth:add":
                 context.user_data["awaiting_auth_add_user_id"] = {"chat_id": query.message.chat_id, "message_id": query.message.message_id}
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, "🔐 <b>增加授权</b>\n────────────\n请输入要授权的 Telegram 用户 ID。", InlineKeyboardMarkup([back_close_row("main_menu:auth", "⬅️ 返回授权管理")]), parse_mode="HTML")
                 return
             if data == "main_menu:auth:roles":
@@ -1999,7 +2063,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     await query.answer("只有超级管理员可以设置普通管理员", show_alert=True)
                     return
                 context.user_data["auth_role_changes"] = {}
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, authorization_role_change_text(context), authorization_role_change_keyboard(context), parse_mode="HTML")
                 return
             role_toggle_match = re.fullmatch(r"main_menu:auth:role_toggle:(\d+)", data)
@@ -2008,7 +2072,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     await query.answer("只有超级管理员可以设置普通管理员", show_alert=True)
                     return
                 target_uid = int(role_toggle_match.group(1))
-                if target_uid == cfg.telegram.admin_user_id:
+                if target_uid in cfg.telegram.super_admin_user_ids:
                     await query.answer("超级管理员只能通过环境变量修改", show_alert=True)
                     return
                 current_role = "manager" if target_uid in cfg.telegram.manager_user_ids else "user"
@@ -2037,9 +2101,11 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 demote_ids = {int(uid) for uid, role in role_changes.items() if role == "user"}
                 before_managers = sorted(cfg.telegram.manager_user_ids)
                 before_users = sorted(cfg.telegram.authorized_user_ids)
-                await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, promote_manager_user_ids=promote_ids, demote_manager_user_ids=demote_ids)
-                after_managers = sorted((set(before_managers) | promote_ids) - demote_ids)
-                after_users = sorted((set(before_users) | demote_ids) - promote_ids)
+                new_managers, new_users = await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.super_admin_user_ids, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, promote_manager_user_ids=promote_ids, demote_manager_user_ids=demote_ids)
+                cfg.telegram.manager_user_ids = new_managers
+                cfg.telegram.authorized_user_ids = new_users
+                after_managers = sorted(new_managers)
+                after_users = sorted(new_users)
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
                 context.user_data.pop("auth_role_changes", None)
                 await query.answer("权限变更已保存")
@@ -2047,7 +2113,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             if data == "main_menu:auth:delete":
                 context.user_data["auth_delete_selected"] = set()
-                await query.answer()
+                await answer_callback_silently(query)
                 delete_hint = "请选择要删除授权的用户。\n超级管理员不可通过 Bot 删除。" if is_super_admin else "请选择要删除授权的普通用户。\n普通管理员不可删除管理员。"
                 await show_callback_page(query, "🔓 <b>删除授权</b>\n────────────\n" + delete_hint, authorization_delete_keyboard(context, is_super_admin), parse_mode="HTML")
                 return
@@ -2076,7 +2142,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 for target_uid in user_ids:
                     emoji = "👑" if target_uid in cfg.telegram.manager_user_ids else "🎩"
                     lines.append(f"{emoji} {html.escape(await resolve_telegram_user_label(target_uid))} (<code>{target_uid}</code>)")
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, "\n".join(lines), authorization_delete_confirm_keyboard(), parse_mode="HTML")
                 return
             if data == "main_menu:auth:del_confirm":
@@ -2092,9 +2158,11 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 before_users = sorted(cfg.telegram.authorized_user_ids)
                 remove_manager_ids = user_ids & cfg.telegram.manager_user_ids
                 remove_user_ids = user_ids & cfg.telegram.authorized_user_ids
-                await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, remove_authorized_user_ids=remove_user_ids, remove_manager_user_ids=remove_manager_ids)
-                after_managers = [uid for uid in before_managers if uid not in remove_manager_ids]
-                after_users = [uid for uid in before_users if uid not in remove_user_ids]
+                new_managers, new_users = await asyncio.to_thread(update_telegram_roles_in_cache_sync, cache_path, cfg.telegram.super_admin_user_ids, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, remove_authorized_user_ids=remove_user_ids, remove_manager_user_ids=remove_manager_ids)
+                cfg.telegram.manager_user_ids = new_managers
+                cfg.telegram.authorized_user_ids = new_users
+                after_managers = sorted(new_managers)
+                after_users = sorted(new_users)
                 await asyncio.to_thread(log_operation_from_query, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
                 context.user_data.pop("auth_delete_selected", None)
                 await query.answer("授权已删除")
@@ -2102,7 +2170,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
 
         if data == "main_menu:clear_history":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "👋🏻 <b>清除对话记录</b>\n────────────\n将尝试清空当前对话记录。\n此操作不可恢复。\n\n⚠️ 确认要继续吗？",
@@ -2115,10 +2183,17 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         if data == "main_menu:clear_history_confirm":
             chat_id = query.message.chat_id
             message_id = query.message.message_id
-            await query.answer("正在清空历史记录...")
-            log.info("开始清空 Telegram 历史记录：chat=%s from_message_id=%s", chat_id, message_id)
-            deleted, failed = await purge_chat_history(chat_id, message_id)
-            log.info("清空 Telegram 历史记录完成：chat=%s deleted=%s failed=%s", chat_id, deleted, failed)
+            await query.answer("正在后台清空历史记录，请稍候...")
+            log.info("开始后台清空 Telegram 历史记录：chat=%s from_message_id=%s", chat_id, message_id)
+
+            async def purge_chat_history_background() -> None:
+                try:
+                    deleted, failed = await purge_chat_history(chat_id, message_id)
+                    log.info("后台清空 Telegram 历史记录完成：chat=%s deleted=%s failed=%s", chat_id, deleted, failed)
+                except Exception as exc:
+                    log.exception("后台清空 Telegram 历史记录失败：chat=%s error=%s", chat_id, exc)
+
+            context.application.create_task(purge_chat_history_background())
             return
 
         if data in {"main_menu:system_check", "main_menu:system_check_refresh"}:
@@ -2141,7 +2216,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data in {"main_menu:notifications", "main_menu:status_notice"}:
-            await query.answer()
+            await answer_callback_silently(query)
             chat_id = str(query.message.chat_id)
             await show_callback_page(
                 query,
@@ -2173,7 +2248,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "main_menu:traffic_management":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🌊 <b>流量统计</b>\n────────────\n请选择功能。",
@@ -2193,22 +2268,22 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "main_menu:ip_monitor":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
-                "🌐 <b>IP 监控</b>\n────────────\n请选择功能。\n\n" + PROXY_PROTOCOL_NOTICE,
+                "🌐 <b>IP 监控</b>\n────────────\n请选择功能。",
                 ip_monitor_keyboard(),
                 parse_mode="HTML",
             )
             return
 
         if data == "main_menu:ip_monitor:period":
-            await query.answer("正在生成查询...")
-            await send_dashboard_card(query.message, "ip_1h", query.from_user.id)
+            await query.answer("正在生成查询，请稍候...")
+            await open_dashboard_card(query, "ip_1h")
             return
 
         if data == "main_menu:ip_monitor:ignore":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🚧 <b>忽略列表</b>\n────────────\n请选择维度。\n\nIPv4 段按 /24 统计；IPv6 暂不参与统计。",
@@ -2220,7 +2295,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         ignored_rules_match = re.fullmatch(r"main_menu:ip_monitor:ignored_rules:(\d+)", data)
         if ignored_rules_match:
             page = int(ignored_rules_match.group(1))
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 ignored_rules_text_sync(cache_path),
@@ -2261,7 +2336,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             dimension = ignore_page_match.group(1)
             page = int(ignore_page_match.group(2))
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n按已采集信息去重展示，并按最近出现时间排序。\n点击按钮可切换忽略状态；前缀 ✅ 表示已忽略。",
@@ -2296,13 +2371,13 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "main_menu:noop":
-            await query.answer()
+            await answer_callback_silently(query)
             return
 
         if data == "main_menu:ip_monitor:user_query":
             context.user_data["awaiting_user_ip_query_id"] = True
             context.user_data.pop("user_ip_query_period", None)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
@@ -2312,12 +2387,12 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "main_menu:parameter_config":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, "🎨 参数配置\n────────────\n请选择要配置的面板参数。", parameter_config_keyboard())
             return
 
         if data == "main_menu:parameter_config:cache_retention":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, cache_retention_text_sync(), cache_retention_keyboard(), parse_mode="HTML")
             return
 
@@ -2326,7 +2401,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             option_key = retention_select_match.group(1)
             days, _ = CACHE_RETENTION_OPTIONS[option_key]
             preview = await asyncio.to_thread(cache_retention_preview_sync, cache_path, days)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, cache_retention_preview_text(option_key, preview), cache_retention_confirm_keyboard(option_key), parse_mode="HTML")
             return
 
@@ -2360,7 +2435,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "main_menu:debug_tools":
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, "🧪 调试功能\n────────────\n请选择要执行的调试操作。", debug_tools_keyboard(is_admin_user_id(query.from_user.id, cfg)))
             return
 
@@ -2371,7 +2446,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
         if data == "main_menu:debug:reset_cache":
             context.user_data.pop("debug_reset_cache_mode", None)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🧹 重置缓存\n\n这是高风险操作，会清空本地缓存与采样数据。\n不会修改 XBoard / MySQL，只影响 Bot 本地 SQLite。\n\n请选择重置方式：",
@@ -2381,7 +2456,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
         if data == "main_menu:debug:reset_cache_now":
             context.user_data["debug_reset_cache_mode"] = "now"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "⚠️ 全部重置确认\n\n将清空：\n- 本地缓存\n- 采样数据\n- 活跃 IP 记录\n- 流量统计范围\n- 置顶仪表盘消息\n\n保留：\n- 自定题图\n- 自定昵称\n\n确认后将重新进入健康检查页，请在页面里观察重新采集情况。",
@@ -2416,7 +2491,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state = traffic_custom_state(context)
             state.clear()
             state.update({"mode": "floor", "phase": "floor", "step": "year", "debug": True})
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 traffic_custom_prompt_text(state),
@@ -2428,7 +2503,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             context.user_data["reset_user_ip_selected"] = set()
             await asyncio.to_thread(upsert_all_cache_users, cache_path, cfg.mysql)
             users = await asyncio.to_thread(list_all_cached_user_buttons_sync, cache_path)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "👤 重置特定用户 IP 记录\n\n请选择要清理 IP 记录的用户；可多选。\n该操作会把所选用户相关的本地 IP 记录标记为忽略，不会修改 XBoard / MySQL。",
@@ -2445,7 +2520,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if not isinstance(selected, set):
                 selected = set(selected or [])
                 context.user_data["reset_user_ip_selected"] = selected
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "👤 重置特定用户 IP 记录\n\n请选择要清理 IP 记录的用户；可多选。\n该操作会把所选用户相关的本地 IP 记录标记为忽略，不会修改 XBoard / MySQL。",
@@ -2486,7 +2561,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             label_lines = "\n".join(f"• {html.escape(label)}" for label in preview.get("labels", [])[:20])
             if len(preview.get("labels", [])) > 20:
                 label_lines += f"\n… 另 {len(preview['labels']) - 20} 个用户"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "⚠️ 请再次确认是否忽略所选用户的 IP 记录。\n\n"
@@ -2530,7 +2605,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         if data == "main_menu:parameter_config:cover":
             context.user_data["awaiting_custom_cover"] = True
             context.user_data.pop("awaiting_custom_nickname", None)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, "🖼 自定题图\n\n请直接发送一张图片。\n收到后，我会把它设为你打开 /start 时显示的题图。", cover_config_keyboard())
             return
 
@@ -2544,7 +2619,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         if data == "main_menu:parameter_config:nickname":
             context.user_data["awaiting_custom_nickname"] = True
             context.user_data.pop("awaiting_custom_cover", None)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, "🏷 自定昵称\n\n请发送要显示在 /start 欢迎语里的昵称。", nickname_config_keyboard())
             return
 
@@ -2556,7 +2631,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data in sections:
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, f"{sections[data]}\n\n此功能入口已预留，等待下一步配置。", empty_section_keyboard())
             return
 
@@ -2571,6 +2646,15 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             await reply_connection_status(update, cfg)
             return
+        init_status = await asyncio.to_thread(initialization_status_sync, cache_path, cfg.ip_geo_queries_per_minute)
+        if init_status.get("initializing"):
+            sent = await update.effective_message.reply_text(
+                await asyncio.to_thread(initialization_progress_text_sync, cache_path, cfg),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 刷新初始化进度", callback_data="main_menu")]]),
+            )
+            await track_auto_delete_message(sent)
+            return
         sent = await update.effective_message.reply_text("🌐 请选择在线记录统计周期：", reply_markup=active_users_keyboard())
         await track_auto_delete_message(sent)
 
@@ -2582,6 +2666,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if is_bot_self_update(update, cfg):
                 return
             await query.answer("未授权", show_alert=True)
+            return
+        if await show_initialization_gate(query):
             return
 
         periods = {
@@ -2602,7 +2688,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 start_ts = int(scoped_query_match.group(2))
                 end_ts = int(scoped_query_match.group(3))
                 context.user_data["user_ip_query_period"] = f"custom:{start_ts}:{end_ts}"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
@@ -2616,7 +2702,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             period_key = query_match.group(1)
             page = int(query_match.group(2) or 0)
             label, window = periods[period_key]
-            await query.answer("正在生成用户按钮...")
+            await query.answer("正在生成用户按钮，请稍候...")
             result, user_buttons = await asyncio.gather(
                 asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window),
                 asyncio.to_thread(active_user_button_items_from_cache_sync, cache_path, window),
@@ -2643,7 +2729,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 start_ts = int(start_text)
                 end_ts = int(end_text)
                 label = "自定区间"
-            await query.answer("正在翻页...")
+            await query.answer("正在翻页，请稍候...")
             result = await asyncio.to_thread(query_user_ips_from_cache_sync, cache_path, xboard_user_id, label, window, start_ts, end_ts, page, 10)
             total_ips = await asyncio.to_thread(count_user_ips_from_cache_sync, cache_path, xboard_user_id, window, start_ts, end_ts)
             await show_callback_page(query, result, user_ip_query_page_keyboard(period_key, xboard_user_id, total_ips, page), parse_mode="HTML")
@@ -2659,7 +2745,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             return
 
         if data == "noop":
-            await query.answer()
+            await answer_callback_silently(query)
             return
 
         detail_match = re.fullmatch(r"active_user_detail:(1h|24h|7d|30d):(\d+)", data)
@@ -2667,7 +2753,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             period_key = detail_match.group(1)
             xboard_user_id = int(detail_match.group(2))
             label, window = periods[period_key]
-            await query.answer("正在查询 IP...")
+            await query.answer("正在查询 IP，请稍候...")
             result = await asyncio.to_thread(
                 query_user_ips_from_cache_sync,
                 cache_path,
@@ -2683,8 +2769,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await query.answer("请求无效，请重新进入。", show_alert=True)
             return
 
-        await query.answer("正在生成查询...")
-        await edit_dashboard_card(query, f"ip_{key}")
+        await query.answer("正在生成查询，请稍候...")
+        await open_dashboard_card(query, f"ip_{key}")
 
     async def ip_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -2694,6 +2780,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if is_bot_self_update(update, cfg):
                 return
             await query.answer("未授权", show_alert=True)
+            return
+        if await show_initialization_gate(query):
             return
         data = query.data or ""
 
@@ -2706,25 +2794,10 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await query.answer("请求无效，请重新进入。", show_alert=True)
                 return
             label, start_ts, end_ts = parsed
-            await query.answer("正在生成用户列表...")
+            await query.answer("正在生成用户列表，请稍候...")
             user_buttons = await asyncio.to_thread(active_user_button_items_from_cache_sync, cache_path, None, start_ts, end_ts)
-            if label == "自定区间":
-                text = "\n".join([
-                    "🔍 <b>自定区间用户详情</b>",
-                    f"时间区间：{datetime.fromtimestamp(start_ts).strftime('%Y-%m-%d %H:%M')} - {datetime.fromtimestamp(end_ts).strftime('%Y-%m-%d %H:%M')}",
-                    "────────────",
-                    "请选择要查看的用户。",
-                    "",
-                    PROXY_PROTOCOL_NOTICE,
-                ])
-            else:
-                text = "\n".join([
-                    f"🔍 <b>{label}用户活跃详情</b>",
-                    "────────────",
-                    "请选择要查看的用户。",
-                    "",
-                    PROXY_PROTOCOL_NOTICE,
-                ])
+            overview = await asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, None, start_ts, end_ts)
+            text = f"{overview}\n\n请选择要查看的用户。"
             if not user_buttons:
                 text += "\n\n暂无可查看用户。"
             await show_callback_page(query, text, ip_detail_list_keyboard(kind, user_buttons, page), parse_mode="HTML")
@@ -2735,7 +2808,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             xboard_user_id = int(notice_match.group(1))
             row = await asyncio.to_thread(ip_alert_row_for_user_sync, cache_path, xboard_user_id)
             mark_no_auto_delete_message(query.message)
-            await query.answer()
+            await answer_callback_silently(query)
             if row:
                 await show_callback_page(query, format_ip_alert(row), ip_alert_keyboard(row), parse_mode="HTML", auto_delete=False)
             else:
@@ -2756,7 +2829,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             source = ignore_menu_match.group(4)
             if source == "alert":
                 mark_no_auto_delete_message(query.message)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 "🚧 <b>忽略当前列表</b>\n────────────\n请选择要从当前活跃 IP 列表中提取的忽略类型。",
@@ -2777,7 +2850,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if source == "alert":
                 mark_no_auto_delete_message(query.message)
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 f"🚧 <b>{title}</b>\n────────────\n已从当前页面的活跃 IP 中去重生成按钮。\n点击可切换忽略状态；前缀 ✅ 表示已忽略。",
@@ -2867,7 +2940,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await query.answer("请求无效，请重新进入。", show_alert=True)
                 return
             label, start_ts, end_ts = parsed
-            await query.answer("正在查询 IP...")
+            await query.answer("正在查询 IP，请稍候...")
             result = await asyncio.to_thread(
                 query_user_ips_from_cache_sync,
                 cache_path,
@@ -2895,13 +2968,15 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             await query.answer("未授权", show_alert=True)
             return
+        if await show_initialization_gate(query):
+            return
         data = query.data or ""
 
         menu_match = re.fullmatch(r"alert_menu:(traffic|ip)", data)
         if menu_match:
             alert_type = menu_match.group(1)
             text = await asyncio.to_thread(alert_summary_sync, cache_path, alert_type)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, text, alert_menu_keyboard(alert_type), parse_mode="HTML")
             return
 
@@ -2913,7 +2988,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             users = await asyncio.to_thread(alert_user_list_sync, cache_path, alert_type, 10000)
             title = "用量异常" if alert_type == "traffic" else "异地登录"
             if not users:
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(
                     query,
                     f"🌟 {'异常告警' if alert_type == 'traffic' else '异地登录'}<b>独立规则</b>\n────────────\n当前本地缓存中还没有用户列表。请等待后台采集完成后再试。",
@@ -2923,7 +2998,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             total_pages = max(1, (len(users) + 9) // 10)
             page = min(max(0, page), total_pages - 1)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 f"🌟 {'异常告警' if alert_type == 'traffic' else '异地登录'}<b>独立规则</b>\n────────────\n请选择用户。",
@@ -2940,7 +3015,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if source == "alert":
                 mark_no_auto_delete_message(query.message)
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, text, alert_user_setting_keyboard_for_source(alert_type, xboard_user_id, source), parse_mode="HTML", auto_delete=(source != "alert"))
             return
 
@@ -2950,7 +3025,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             alert_type = period_page_match.group(1)
             xboard_user_id = int(period_page_match.group(2))
             title = "流量告警周期" if alert_type == "traffic" else "异地告警周期"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(
                 query,
                 f"🕒 <b>{title}</b>\n────────────\n请选择该用户的告警统计周期。",
@@ -2963,7 +3038,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         if global_period_page_match:
             alert_type = global_period_page_match.group(1)
             title = "用量异常默认周期" if alert_type == "traffic" else "异地登录默认周期"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, f"🕒 <b>{title}</b>\n────────────\n请选择默认告警统计周期。", alert_global_period_select_keyboard(alert_type), parse_mode="HTML")
             return
 
@@ -2977,11 +3052,11 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                     "message_id": query.message.message_id,
                 }
                 unit = "GB，例如：150" if alert_type == "traffic" else "城市数，例如：4"
-                await query.answer()
+                await answer_callback_silently(query)
                 await show_callback_page(query, f"✍️ 请输入默认规则 ({unit})", InlineKeyboardMarkup([back_close_row(f"alert_global:{alert_type}", "⬅️ 返回")]))
                 return
             text = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, text, alert_global_keyboard(alert_type), parse_mode="HTML")
             return
 
@@ -3028,7 +3103,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 "message_id": query.message.message_id,
             }
             unit = "GB，例如：150" if alert_type == "traffic" else "城市数，例如：4"
-            await query.answer()
+            await answer_callback_silently(query)
             await show_callback_page(query, f"✍️ 请输入独立规则 ({unit})", InlineKeyboardMarkup([back_close_row(f"alert_user:{alert_type}:{xboard_user_id}", "⬅️ 返回")]))
             return
 
@@ -3119,7 +3194,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             "30d": ("近 30 天", timedelta(days=30)),
         }
         target = (query.data or "").split(":", 1)[-1]
-        await query.answer("返回")
+        await answer_callback_silently(query)
         if target in periods:
             label, window = periods[target]
             result = await asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window)
@@ -3155,31 +3230,57 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             text = (update.effective_message.text or "").strip()
             if not re.fullmatch(r"\d+", text):
-                await reply_and_track("Telegram 用户 ID 必须是纯数字，请重新输入；或发送 /start 取消。")
+                await reply_cover_card(
+                    update,
+                    context,
+                    "🔐 <b>增加授权</b>\n────────────\nTelegram 用户 ID 必须是纯数字，请重新输入；或发送 /start 取消。",
+                    InlineKeyboardMarkup([back_close_row("main_menu:auth", "⬅️ 返回授权管理")]),
+                )
                 return
             target_uid = int(text)
             try:
                 if target_uid in cfg.telegram.admin_user_ids:
-                    await reply_and_track("该用户已是管理员，无需重复授权。", reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)))
+                    await reply_cover_card(
+                        update,
+                        context,
+                        "🔐 <b>增加授权</b>\n────────────\n该用户已是管理员，无需重复授权。",
+                        authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                    )
                     return
                 label = await resolve_telegram_user_label(target_uid)
                 before_users = sorted(cfg.telegram.authorized_user_ids)
-                await asyncio.to_thread(update_authorized_users_in_cache_sync, cache_path, cfg.telegram.admin_user_id, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, target_uid, None)
-                after_users = sorted(set(before_users) | {target_uid})
+                new_users = await asyncio.to_thread(update_authorized_users_in_cache_sync, cache_path, cfg.telegram.super_admin_user_ids, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, target_uid, None)
+                cfg.telegram.authorized_user_ids = new_users
+                after_users = sorted(new_users)
                 await asyncio.to_thread(log_operation_from_update, update, "auth", "增加授权", f"修改前：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后：{', '.join(str(uid) for uid in after_users) or '空'}\n新增：{target_uid}")
             except ValueError as exc:
-                await reply_and_track(str(exc), reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)))
+                await reply_cover_card(
+                    update,
+                    context,
+                    f"🔐 <b>增加授权</b>\n────────────\n{html.escape(str(exc))}",
+                    authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                )
                 return
             except Exception as exc:
                 log.exception("写入授权用户失败：%s", exc)
-                await reply_and_track("写入授权失败，请检查运行状态。", reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)))
+                await reply_cover_card(
+                    update,
+                    context,
+                    "🔐 <b>增加授权</b>\n────────────\n写入授权失败，请检查运行状态。",
+                    authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+                )
                 return
             context.user_data.pop("awaiting_auth_add_user_id", None)
-            await reply_and_track(
-                f"✅ 已增加授权：{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
-                parse_mode="HTML",
-                reply_markup=authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
+            await reply_cover_card(
+                update,
+                context,
+                f"✅ <b>已增加授权</b>\n────────────\n{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
+                authorization_manage_keyboard(is_super_admin_user_id(user_id(update), cfg)),
             )
+            try:
+                await context_bot_delete_message(update.effective_message.chat_id, update.effective_message.message_id)
+            except Exception:
+                pass
             return
 
         if context.user_data.get("awaiting_custom_cover"):
@@ -3286,6 +3387,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             if alert_type not in {"traffic", "ip"}:
                 await edit_global_alert_prompt("设置类型无效，请从菜单重新进入。", None, None)
                 return
+            input_chat_id = update.effective_message.chat_id
+            input_message_id = update.effective_message.message_id
             before_period = await asyncio.to_thread(alert_global_period_sync, cache_path, alert_type)
             before_threshold = await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)
             before = f"{alert_period_label(before_period)} / {format_bytes(before_threshold) if alert_type == 'traffic' else str(before_threshold) + ' 个城市'}"
@@ -3295,6 +3398,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_update, update, alert_category(alert_type), "调整默认规则", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
             result = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
             await edit_global_alert_prompt(result, alert_global_keyboard(alert_type), "HTML")
+            await context_bot_delete_message(input_chat_id, input_message_id)
             return
 
         if context.user_data.get("awaiting_alert_custom"):
@@ -3361,6 +3465,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 )
                 return
             context.user_data.pop("awaiting_alert_custom", None)
+            input_chat_id = update.effective_message.chat_id
+            input_message_id = update.effective_message.message_id
             before_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             before = alert_setting_label(before_setting, alert_type, cache_path)
             if alert_type == "traffic":
@@ -3375,6 +3481,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_update, update, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             result = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await edit_alert_prompt(result, alert_user_setting_keyboard(alert_type, xboard_user_id), "HTML")
+            await context_bot_delete_message(input_chat_id, input_message_id)
             return
 
         if context.user_data.get("awaiting_user_ip_query_id"):
@@ -3423,7 +3530,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear_history", clear_history_command))
-    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("version", version_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("health", health_command))
@@ -3433,7 +3539,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
     app.add_handler(CommandHandler("traffic_users", traffic_users))
     app.add_handler(CommandHandler("traffic_nodes", traffic_nodes))
     app.add_handler(CallbackQueryHandler(version_update_callback, pattern=r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$"))
-    app.add_handler(CallbackQueryHandler(main_menu_callback, pattern=r"^main_menu(?::(clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
+    app.add_handler(CallbackQueryHandler(main_menu_callback, pattern=r"^main_menu(?::(init_ack|clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
     app.add_handler(CallbackQueryHandler(alert_callback, pattern=r"^(alert_menu:(?:traffic|ip)|alert_period_page:(?:traffic|ip):\d+|alert_global_period_page:(?:traffic|ip)|alert_global:(?:traffic|ip)(?::(?:custom|period:(?:1h|24h|7d|today|week)))?|alert_users:(?:traffic|ip):\d+|alert_user:(?:traffic|ip):\d+(?::alert)?|alert_set:(?:traffic|ip):(?:custom:\d+|period:(?:1h|24h|7d|today|week):\d+|threshold:\d+:\d+|whitelist:\d+|reset:\d+))$"))
     app.add_handler(CallbackQueryHandler(traffic_daily_callback, pattern=r"^(traffic_menu(?::[A-Za-z0-9_]+)?|traffic_back:[A-Za-z0-9_]+|traffic_(?:period|switch):(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(?:users|nodes))?|ip_custom:start|traffic_custom:(start(?::(?:combined|users|nodes))?|now|(year|month|day|hour|minute):\d+|back:(year|month|day|hour))|traffic_floor:(start|confirm:\d+)|traffic_dashboard:(pin|unpin|delete):[A-Za-z0-9_]+)$"))
     app.add_handler(CallbackQueryHandler(active_users_callback, pattern=r"^(active_users(?::|_query:)(1h|24h|7d|30d)(?::\d+)?|ip_user_query:(?:(1h|24h|7d|30d)|custom:\d+:\d+)|user_ip_page:\d+:\d+:(?:all|(?:1h|24h|7d|30d)|custom:\d+:\d+)|active_user_detail:(1h|24h|7d|30d):\d+|active_users_cancel:(1h|24h|7d|30d)|noop)$"))
@@ -3595,6 +3701,5 @@ def ignore_items_from_ip_rows(rows: list[sqlite3.Row], dimension: str) -> list[d
         {"value": value, "label": str(bucket["label"]), "sub": f"{len(bucket['ips'])} IP", "last_seen_at": int(bucket["last_seen_at"])}
         for value, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
     ]
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

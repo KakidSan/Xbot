@@ -1,17 +1,10 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
-from ..common import *
 
-def proxy_protocol_help_text() -> str:
-    return "\n".join([
-        "📘 <b>Proxy Protocol 配置说明</b>",
-        "────────────",
-        "转发入口通过 Proxy Protocol 把真实的客户端 IP 传递给后端服务。",
-        "",
-        "Xbot 的 IP 监控功能严重依赖 Proxy Protocol 的传递结果，如果没有正确配置，将无法保证统计的准确性。",
-        "",
-        "后端服务的相关配置，可参考 <a href=\"https://hekicore.github.io/heki-docs/#/other/forward-get-real-ip\">Heki Docs</a>。",
-    ])
+from ..common import *
+from ..db.cache import *
+from ..db.redis import *
+from ..db.mysql import *
+from ..geo import *
 
 def user_display(update: Update) -> str:
     user = update.effective_user
@@ -52,22 +45,22 @@ def format_ip_alert(row: dict[str, Any], recovered: bool = False, previous_city_
         lines = [title, "────────────", f"用户：{label}", rule_line]
         if change_line:
             lines.append(change_line)
-        lines.extend([f"{period_label}城市数：{city_count}", f"涉及城市：{cities}", "", PROXY_PROTOCOL_NOTICE])
+        lines.extend([f"{period_label}城市数：{city_count}", f"涉及城市：{cities}"])
         return "\n".join(lines)
     lines = [title, "────────────", f"用户：{label}", rule_line]
     if change_line:
         lines.append(change_line)
         lines.append("状态：仍超过阈值")
-    lines.extend([f"{period_label}城市数：<b>{city_count}</b>", f"涉及城市：{cities}", "", PROXY_PROTOCOL_NOTICE])
+    lines.extend([f"{period_label}城市数：<b>{city_count}</b>", f"涉及城市：{cities}"])
     if previous_city_count is None:
         lines.extend(["", "基础版只在首次超出和恢复时提醒；高级版会在超出阈值后的城市数量变化时再次提醒。"])
     return "\n".join(lines)
 
 def format_geo_pending_text(pending_count: int, queries_per_minute: int) -> str:
     if pending_count <= 0:
-        return "待补全 0 条"
+        return "待补全 0 个"
     wait_seconds = estimate_geo_wait_seconds(pending_count, queries_per_minute)
-    return f"待补全 {pending_count} 条，预计约 {format_duration(wait_seconds)}"
+    return f"待补全 {pending_count} 个，预计约 {format_duration(wait_seconds)}"
 
 def format_duration(seconds: int) -> str:
     seconds = max(0, int(seconds))
@@ -177,8 +170,8 @@ def bot_health_overview_text_sync(cfg: AppConfig, cache_path: Path, admin_view: 
         f"首次缓存采集：{format_age_with_time(first_collect_at)}",
         f"最后缓存采集：{format_age_with_time(collect_ts)}",
         "",
-        f"IP 缓存：{counts['active_ips']} 条",
-        f"IP 归属地缓存：{geo_status['geo_total']} 条 ({geo_pending_text})",
+        f"IP 缓存：{counts['active_ips']} 个",
+        f"IP 归属地缓存：{geo_status['geo_total']} 个 ({geo_pending_text})",
         f"用户信息缓存：{counts['users']} 个",
         "",
         f"首次流量采样：{format_age_with_time(first_traffic_at)}",
@@ -243,9 +236,9 @@ def bot_status_text_sync(cfg: AppConfig, cache_path: Path) -> str:
         f"统计起始点：{format_timestamp(stats_floor) if stats_floor else '未手动重置'}",
         f"采集间隔：{format_duration(int(cfg.collector_interval_seconds))}",
         "",
-        f"活跃 IP 缓存：{counts['active_ips']} 条",
+        f"IP 缓存：{counts['active_ips']} 个",
         f"用户缓存：{counts['users']} 个",
-        f"IP 归属地缓存：{geo_status['geo_total']} 条 (待补全 {geo_status['geo_pending']} 条)",
+        f"IP 归属地缓存：{geo_status['geo_total']} 个 (待补全 {geo_status['geo_pending']} 个)",
         f"流量增量样本：{counts['traffic_samples']} 条",
         f"流量面板消息：{counts['pinned_dashboards']} 条",
     ]
@@ -578,7 +571,7 @@ def alert_global_setting_text_sync(cache_path: Path, alert_type: str) -> str:
     else:
         threshold_text = f"{threshold} 个城市"
         title = "🎚 异地登录<b>默认规则</b>"
-        suffix = "\n\n" + PROXY_PROTOCOL_NOTICE
+        suffix = ""
     return "\n".join([title, "────────────", f"当前规则：<b>{period_label} / {threshold_text}</b>"] ) + suffix
 
 def alert_user_setting_text_sync(cache_path: Path, alert_type: str, xboard_user_id: int) -> str:
@@ -601,7 +594,7 @@ def alert_user_setting_text_sync(cache_path: Path, alert_type: str, xboard_user_
             current_line = "当前适用：白名单 (不提醒)"
         else:
             current_line = f"当前适用：{'独立规则' if uses_independent else '默认规则'} (<b>{effective}</b>)"
-        lines = ["🚨 <b>用户异地告警设置</b>", "────────────", f"用户：{render_user_label(xboard_user_id, name)}", current_line, "", PROXY_PROTOCOL_NOTICE]
+        lines = ["🚨 <b>用户异地告警设置</b>", "────────────", f"用户：{render_user_label(xboard_user_id, name)}", current_line]
     return "\n".join(lines)
 
 def alert_summary_sync(cache_path: Path, alert_type: str) -> str:
@@ -613,8 +606,6 @@ def alert_summary_sync(cache_path: Path, alert_type: str) -> str:
         title = "🚨 <b>异地登录</b>"
         default_line = f"默认规则：{alert_period_label(alert_global_period_sync(cache_path, 'ip'))} / <b>{alert_global_threshold_sync(cache_path, 'ip')} 个城市</b>"
     lines = [title, "────────────", default_line]
-    if alert_type == "ip":
-        lines.extend(["", PROXY_PROTOCOL_NOTICE])
     return "\n".join(lines)
 
 def alert_period_label(period: str | None) -> str:
@@ -622,6 +613,5 @@ def alert_period_label(period: str | None) -> str:
 
 def notification_ip_alert_mode_label(mode: str) -> str:
     return {"off": "关闭", "basic": "基础", "advanced": "高级"}.get(mode, "基础")
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

@@ -1,6 +1,7 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
+
 from ..common import *
+from .redis import test_redis_connection_sync, tcp_check
 
 def mysql_config_missing(cfg: MySQLConfig) -> bool:
     return not cfg.host.strip() or not cfg.port or not cfg.username.strip() or not cfg.database.strip()
@@ -172,6 +173,8 @@ def fetch_all_user_display_details_sync(cfg: MySQLConfig) -> dict[int, dict[str,
     return details
 
 def connection_check_lines_sync(cfg: AppConfig, cache_path: Path) -> tuple[list[str], bool, bool, bool]:
+    from .cache import cache_connect, init_cache
+
     mysql_result = test_mysql_connection_sync(cfg.mysql)
     redis_result = test_redis_connection_sync(cfg.redis)
     mysql_ok = mysql_result.startswith("✅")
@@ -202,6 +205,5 @@ def connection_check_lines_sync(cfg: AppConfig, cache_path: Path) -> tuple[list[
         lines.extend(compact_connection_error_lines(redis_result))
     lines.append(f"{'🟢' if sqlite_ok else '🔴'} SQLite {sqlite_detail}")
     return (lines, mysql_ok, redis_ok, sqlite_ok)
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

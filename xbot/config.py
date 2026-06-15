@@ -1,27 +1,23 @@
 from __future__ import annotations
-from ._bootstrap import install_module_symbols
+
 from .common import *
+from .db.cache import auth_roles_load_sync, auth_roles_save_sync
 
 @dataclass
 class TelegramConfig:
     bot_token: str
-    admin_user_id: int | None = None  # 唯一超级管理员，只能通过环境变量修改。
+    admin_user_id: int | None = None  # 兼容旧字段：第一个超级管理员。
+    super_admin_user_ids: set[int] = field(default_factory=set)  # 超级管理员，只能通过环境变量修改。
     manager_user_ids: set[int] = field(default_factory=set)  # 普通管理员，可由超级管理员在 Bot 内管理。
     authorized_user_ids: set[int] = field(default_factory=set)  # 普通授权用户。
 
     @property
     def admin_user_ids(self) -> set[int]:
-        users = set(self.manager_user_ids)
-        if self.admin_user_id is not None:
-            users.add(self.admin_user_id)
-        return users
+        return set(self.super_admin_user_ids) | set(self.manager_user_ids)
 
     @property
     def allowed_user_ids(self) -> set[int]:
-        users = set(self.authorized_user_ids) | set(self.manager_user_ids)
-        if self.admin_user_id is not None:
-            users.add(self.admin_user_id)
-        return users
+        return set(self.authorized_user_ids) | set(self.manager_user_ids) | set(self.super_admin_user_ids)
 
 @dataclass
 class RedisConfig:
@@ -50,27 +46,6 @@ class AppConfig:
     cache_retention_days: int = DEFAULT_CACHE_RETENTION_DAYS
     ip_geo_queries_per_minute: int = DEFAULT_IP_GEO_QUERIES_PER_MINUTE
 
-def _as_int_set(value: Any) -> set[int]:
-    """Parse Telegram user ids from env comma strings or internal JSON arrays."""
-    if value is None:
-        return set()
-    if isinstance(value, str):
-        raw_items = [item.strip() for item in value.split(",")]
-    elif isinstance(value, list):
-        raw_items = value
-    else:
-        raise ValueError("Telegram 用户 ID 列表必须是英文逗号分隔字符串")
-
-    result: set[int] = set()
-    for item in raw_items:
-        if item in (None, ""):
-            continue
-        try:
-            result.add(int(item))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"无效 Telegram 用户 ID：{item!r}") from exc
-    return result
-
 def _optional_int(value: Any) -> int | None:
     return int(value) if value not in (None, "") else None
 
@@ -92,7 +67,7 @@ def apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     app_raw = raw.setdefault("app", {})
 
     telegram_raw["bot_token"] = env_value("TELEGRAM_BOT_TOKEN", telegram_raw.get("bot_token"))
-    telegram_raw["admin_user_id"] = env_int("TELEGRAM_ADMIN_USER_ID", telegram_raw.get("admin_user_id"))
+    telegram_raw["admin_user_id"] = env_value("TELEGRAM_ADMIN_USER_ID", telegram_raw.get("admin_user_id"))
     telegram_raw["manager_user_ids"] = env_value("TELEGRAM_MANAGER_USER_IDS", telegram_raw.get("manager_user_ids"))
     telegram_raw["authorized_user_ids"] = env_value("TELEGRAM_AUTHORIZED_USER_IDS", telegram_raw.get("authorized_user_ids"))
 
@@ -123,7 +98,8 @@ def build_config_from_env() -> AppConfig:
     cache_path = Path(str(app_raw.get("cache_path") or DEFAULT_CACHE_PATH)).expanduser()
 
     admin_raw = telegram_raw.get("admin_user_id")
-    admin_user_id = int(admin_raw) if admin_raw not in (None, "") else None
+    super_admin_user_ids = _as_int_set(admin_raw)
+    admin_user_id = min(super_admin_user_ids) if super_admin_user_ids else None
     manager_user_ids = _as_int_set(telegram_raw.get("manager_user_ids"))
     authorized_user_ids = _as_int_set(telegram_raw.get("authorized_user_ids"))
     stored_roles = auth_roles_load_sync(cache_path)
@@ -131,18 +107,15 @@ def build_config_from_env() -> AppConfig:
         auth_roles_save_sync(cache_path, manager_user_ids, authorized_user_ids)
     else:
         manager_user_ids, authorized_user_ids = stored_roles
-    if admin_user_id is not None:
-        manager_user_ids.discard(admin_user_id)
-        authorized_user_ids.discard(admin_user_id)
+    manager_user_ids.difference_update(super_admin_user_ids)
+    authorized_user_ids.difference_update(super_admin_user_ids)
     authorized_user_ids.difference_update(manager_user_ids)
-    allowed_user_ids = set(authorized_user_ids) | set(manager_user_ids)
-    if admin_user_id is not None:
-        allowed_user_ids.add(admin_user_id)
+    allowed_user_ids = set(authorized_user_ids) | set(manager_user_ids) | set(super_admin_user_ids)
     if not allowed_user_ids:
         log.warning("Telegram 授权用户为空，当前将拒绝所有 Telegram 用户访问")
 
     return AppConfig(
-        telegram=TelegramConfig(bot_token=token, admin_user_id=admin_user_id, manager_user_ids=manager_user_ids, authorized_user_ids=authorized_user_ids),
+        telegram=TelegramConfig(bot_token=token, admin_user_id=admin_user_id, super_admin_user_ids=super_admin_user_ids, manager_user_ids=manager_user_ids, authorized_user_ids=authorized_user_ids),
         redis=RedisConfig(
             host=str(redis_raw.get("host", "") or ""),
             port=_optional_int(redis_raw.get("port")),
@@ -162,6 +135,5 @@ def build_config_from_env() -> AppConfig:
         cache_retention_days=DEFAULT_CACHE_RETENTION_DAYS,
         ip_geo_queries_per_minute=DEFAULT_IP_GEO_QUERIES_PER_MINUTE,
     )
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

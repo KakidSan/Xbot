@@ -1,6 +1,7 @@
 from __future__ import annotations
-from ._bootstrap import install_module_symbols
+
 from .common import *
+from .db.cache import *
 
 def cache_geo_status_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
@@ -358,6 +359,5 @@ def backfill_geo_pending_until_complete(cache_path: Path, queries_per_minute: in
             log.warning("启动初始化 IP 归属地补全未取得进展，等待 60 秒后重试")
             time.sleep(60.0)
     return total, success, failed
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

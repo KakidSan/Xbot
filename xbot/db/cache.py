@@ -1,6 +1,315 @@
 from __future__ import annotations
-from .._bootstrap import install_module_symbols
+
 from ..common import *
+from .mysql import collect_traffic_counters_sync, fetch_user_display_details_sync, fetch_all_user_display_details_sync
+
+def _normalize_geo_name(value: Any) -> str:
+    return str(value or "").strip()
+
+def _geo_text_contains(values: list[str], patterns: list[str]) -> bool:
+    text = " ".join(values)
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+def _normalize_taiwan_city(region: str, city: str, district: str) -> str:
+    county_cities = {
+        "台北市", "新北市", "桃园市", "臺北市", "新北市", "桃園市", "台中市", "臺中市", "台南市", "臺南市", "高雄市",
+        "基隆市", "新竹市", "嘉义市", "嘉義市", "新竹县", "新竹縣", "苗栗县", "苗栗縣", "彰化县", "彰化縣",
+        "南投县", "南投縣", "云林县", "雲林縣", "嘉义县", "嘉義縣", "屏东县", "屏東縣", "宜兰县", "宜蘭縣",
+        "花莲县", "花蓮縣", "台东县", "臺東縣", "澎湖县", "澎湖縣", "金门县", "金門縣", "连江县", "連江縣",
+    }
+    aliases = {"Taipei": "台北市", "New Taipei": "新北市", "Taoyuan": "桃园市", "Taichung": "台中市", "Tainan": "台南市", "Kaohsiung": "高雄市"}
+    for item in (region, city, district):
+        name = _normalize_geo_name(item)
+        if not name:
+            continue
+        if name in county_cities:
+            return name
+        if name in aliases:
+            return aliases[name]
+    return _normalize_geo_name(region or city or district) or "台湾未知城市"
+
+def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
+    country_code = _normalize_geo_name(data.get("countryCode")).upper()
+    country = _normalize_geo_name(data.get("country"))
+    region = _normalize_geo_name(data.get("regionName"))
+    city = _normalize_geo_name(data.get("city"))
+    district = _normalize_geo_name(data.get("district"))
+    values = [country, region, city, district]
+
+    if country_code == "HK" or _geo_text_contains(values, [r"香港", r"Hong\s*Kong"]):
+        return {"key": "HK:香港", "name": "香港", "level": "sar_city"}
+    if country_code == "MO" or _geo_text_contains(values, [r"澳门", r"澳門", r"Macau", r"Macao"]):
+        return {"key": "MO:澳门", "name": "澳门", "level": "sar_city"}
+    if country_code == "TW" or _geo_text_contains(values, [r"台湾", r"Taiwan"]):
+        stat_name = _normalize_taiwan_city(region, city, district)
+        return {"key": f"TW:{stat_name}", "name": stat_name, "level": "tw_city"}
+    if country_code == "CN" or country == "中国":
+        municipalities = {"北京市", "上海市", "天津市", "重庆市"}
+        if region in municipalities:
+            return {"key": f"CN:{region}", "name": region, "level": "municipality"}
+        stat_name = city or region or "未知城市"
+        return {"key": f"CN:{region or '未知省份'}:{stat_name}", "name": stat_name, "level": "city"}
+    stat_name = city or region or country or "未知地区"
+    return {"key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}", "name": stat_name, "level": "city"}
+
+def _cache_format_bytes(value: int | float | None) -> str:
+    size = float(value or 0)
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    for unit in units:
+        if abs(size) < 1024 or unit == units[-1]:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} PB"
+
+def cached_user_button_label(row: sqlite3.Row | None, xboard_user_id: int) -> str:
+    display_name = str(row["display_name"] or "").strip() if row else ""
+    if display_name:
+        return f"{display_name} (user_id: {xboard_user_id})"
+    return f"用户 {xboard_user_id}"
+
+def geo_area_rule_label(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return value
+    if "|" in value:
+        return " / ".join(part for part in value.split("|") if part)
+    if ":" in value:
+        return value.split(":")[-1] or value
+    return value
+
+def raw_geo_data(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        raw = row["raw"]
+    except (KeyError, IndexError):
+        raw = None
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+def safe_autolink_text(value: str) -> str:
+    """Prevent Telegram from auto-linking domain-like fragments in plain text."""
+    return value.replace(".", ".\u200b")
+
+def _row_value(row: sqlite3.Row, name: str) -> Any:
+    try:
+        return row[name]
+    except (KeyError, IndexError):
+        return None
+
+def geo_area_key(row: sqlite3.Row) -> str | None:
+    stat_area_key = str(_row_value(row, "stat_area_key") or "").strip()
+    if stat_area_key:
+        return stat_area_key
+    country = str(_row_value(row, "country") or "").strip()
+    region = str(_row_value(row, "region") or "").strip()
+    city = str(_row_value(row, "city") or "").strip()
+    if city:
+        return "|".join(part for part in (country, region, city) if part)
+    if region:
+        return "|".join(part for part in (country, region) if part)
+    if country:
+        return country
+    return None
+
+def geo_area_display_label(row: sqlite3.Row, value: str | None = None) -> str:
+    """Human-facing area label. Do not expose internal rule keys like JP:Tokyo:Tokyo."""
+    stat_area_name = str(_row_value(row, "stat_area_name") or "").strip()
+    country = str(_row_value(row, "country") or "").strip()
+    region = str(_row_value(row, "region") or "").strip()
+    city = str(_row_value(row, "city") or "").strip()
+    parts: list[str] = []
+    for part in (country, region, city or stat_area_name):
+        if part and part not in parts:
+            parts.append(part)
+    if parts:
+        return " / ".join(parts)
+    return geo_area_rule_label(value or "")
+
+def count_geo_areas(rows: list[sqlite3.Row]) -> int:
+    return len({key for row in rows if (key := geo_area_key(row))})
+
+def render_cached_user_label(row: sqlite3.Row | None, xboard_user_id: int) -> str:
+    display_name = str(row["display_name"] or "").strip() if row else ""
+    if display_name:
+        return f"{html.escape(display_name)} (user_id: {html.escape(str(xboard_user_id))})"
+    return f"用户 {html.escape(str(xboard_user_id))}"
+
+def format_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} 小时 {minutes} 分钟"
+    if minutes:
+        return f"{minutes} 分钟 {sec} 秒" if sec else f"{minutes} 分钟"
+    return f"{sec} 秒"
+
+def format_timestamp(ts: int | None) -> str:
+    if not ts:
+        return "未知"
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+def ipv4_24_cidr(value: str) -> str | None:
+    try:
+        ip_obj = ipaddress.ip_address(str(value).strip())
+    except ValueError:
+        return None
+    if ip_obj.version != 4:
+        return None
+    return str(ipaddress.ip_network(f"{ip_obj}/24", strict=False))
+
+def asn_key_from_raw(raw: dict[str, Any]) -> str | None:
+    as_text = str(raw.get("as") or "").strip()
+    match = re.search(r"\bAS\s*(\d+)\b", as_text, re.IGNORECASE)
+    if match:
+        return f"AS{match.group(1)}"
+    asn = str(raw.get("asname") or raw.get("org") or raw.get("isp") or "").strip()
+    return asn or None
+
+def asn_label_from_raw(raw: dict[str, Any]) -> str | None:
+    key = asn_key_from_raw(raw)
+    name = str(raw.get("asname") or raw.get("org") or raw.get("isp") or "").strip()
+    if key and name and name != key:
+        return f"{key} {name}"
+    return key or name or None
+
+def geo_location_text(row: sqlite3.Row) -> str:
+    raw_parts = [str(_row_value(row, name) or "").strip() for name in ("country", "region", "city", "district")]
+    parts: list[str] = []
+    for part in raw_parts:
+        if part and part not in parts:
+            parts.append(part)
+    return "，".join(parts)
+
+def asn_text(row: sqlite3.Row) -> str:
+    raw = raw_geo_data(row)
+    return asn_label_from_raw(raw) or str(_row_value(row, "isp") or "").strip() or "待查询"
+
+def asn_key_for_geo_row(row: sqlite3.Row) -> str | None:
+    return asn_key_from_raw(raw_geo_data(row))
+
+def ignore_items_from_ip_rows(rows: list[sqlite3.Row], dimension: str) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if dimension == "area":
+            value = geo_area_key(row)
+            if not value:
+                continue
+            label = geo_area_display_label(row, value)
+        elif dimension == "asn":
+            value = asn_key_for_geo_row(row)
+            if not value:
+                continue
+            label = asn_text(row)
+        elif dimension == "cidr":
+            value = ipv4_24_cidr(str(row["ip"] or ""))
+            if not value:
+                continue
+            label = value
+        else:
+            continue
+        bucket = buckets.setdefault(value, {"value": value, "label": label, "ips": set(), "last_seen_at": 0})
+        bucket["ips"].add(str(row["ip"]))
+        bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
+    return [
+        {"value": value, "label": str(bucket["label"]), "sub": f"{len(bucket['ips'])} IP", "last_seen_at": int(bucket["last_seen_at"])}
+        for value, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
+    ]
+
+def render_cached_ip_bucket(title: str, rows: list[sqlite3.Row], shown_ips: set[str], cutoff_ts: int) -> list[str]:
+    bucket_rows: list[sqlite3.Row] = []
+    for row in rows:
+        ip = str(row["ip"])
+        if ip in shown_ips:
+            continue
+        if int(row["last_seen_at"]) < cutoff_ts:
+            continue
+        bucket_rows.append(row)
+        shown_ips.add(ip)
+
+    lines = [f"🌐 <b>{title}活跃 IP {len(bucket_rows)} 个，活跃地区 {count_geo_areas(bucket_rows)} 个</b>", ""]
+    if not bucket_rows:
+        return lines[:-1]
+    for index, row in enumerate(bucket_rows, start=1):
+        ip = str(row["ip"])
+        location = geo_location_text(row) or "待查询"
+        safe_location = html.escape(safe_autolink_text(location))
+        safe_asn = html.escape(safe_autolink_text(asn_text(row)))
+        lines.extend([
+            f"{index}. <code>{html.escape(ip)}/24</code>",
+            f"📍地区：{safe_location}",
+            f"🏷️ ASN：{safe_asn}",
+            f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
+            "────────────",
+        ])
+    if lines[-1] == "────────────":
+        lines.pop()
+    return lines
+
+def render_user_ip_rows_page(
+    user_label: str,
+    label: str,
+    rows: list[sqlite3.Row],
+    page: int = 0,
+    page_size: int = 10,
+    start_ts: int | None = None,
+    end_ts: int | None = None,
+) -> str:
+    safe_page_size = max(1, min(page_size, 50))
+    total = len(rows)
+    total_pages = max(1, (total + safe_page_size - 1) // safe_page_size)
+    page = min(max(page, 0), total_pages - 1)
+    start = page * safe_page_size
+    page_rows = rows[start:start + safe_page_size]
+    if start_ts is not None and end_ts is not None and label == "自定区间":
+        lines = [
+            f"{user_label}",
+            f"时间区间：{datetime.fromtimestamp(start_ts).strftime('%Y-%m-%d %H:%M')} - {datetime.fromtimestamp(end_ts).strftime('%Y-%m-%d %H:%M')}",
+            f"活跃 IP {total} 个，活跃地区 {count_geo_areas(rows)} 个",
+            "────────────",
+            "",
+        ]
+    else:
+        lines = [
+            f"{user_label} {label}活跃 IP {total} 个，活跃地区 {count_geo_areas(rows)} 个",
+            "────────────",
+            "",
+        ]
+    if not page_rows:
+        lines.append("暂无符合条件的活跃 IP。")
+        return "\n".join(lines).strip()
+    for index, row in enumerate(page_rows, start=start + 1):
+        ip = str(row["ip"])
+        location = geo_location_text(row) or "待查询"
+        safe_location = html.escape(safe_autolink_text(location))
+        safe_asn = html.escape(safe_autolink_text(asn_text(row)))
+        lines.extend([
+            f"{index}. <code>{html.escape(ip)}/24</code>",
+            f"📍地区：{safe_location}",
+            f"🏷️ ASN：{safe_asn}",
+            f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
+            "────────────",
+        ])
+    if lines[-1] == "────────────":
+        lines.pop()
+    return "\n".join(lines).strip()
+
+def alert_setting_label(setting: dict[str, Any], alert_type: str, cache_path: Path | None = None) -> str:
+    if alert_type == "traffic":
+        if int(setting.get("traffic_whitelist") or 0):
+            return "白名单"
+        period = setting.get("traffic_period") or (alert_global_period_sync(cache_path, "traffic") if cache_path else ALERT_DEFAULT_PERIOD)
+        threshold = setting.get("traffic_threshold_bytes") or (alert_global_threshold_sync(cache_path, "traffic") if cache_path else TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES)
+        return f"{alert_period_label(period)} / {_cache_format_bytes(int(threshold))}"
+    if int(setting.get("ip_whitelist") or 0):
+        return "白名单"
+    period = setting.get("ip_period") or (alert_global_period_sync(cache_path, "ip") if cache_path else ALERT_DEFAULT_PERIOD)
+    threshold = setting.get("ip_city_threshold") or (alert_global_threshold_sync(cache_path, "ip") if cache_path else IP_ALERT_DEFAULT_CITY_THRESHOLD)
+    return f"{alert_period_label(period)} / {int(threshold)} 个城市"
 
 def resolve_cache_path(path: Path, base_dir: Path | None = None) -> Path:
     if path.is_absolute():
@@ -404,7 +713,7 @@ def auth_roles_save_sync(cache_path: Path, manager_user_ids: set[int], authorize
 
 def update_telegram_roles_in_cache_sync(
     cache_path: Path,
-    admin_user_id: int | None,
+    admin_user_id: int | set[int] | None,
     current_manager_user_ids: set[int],
     current_authorized_user_ids: set[int],
     add_authorized_user_id: int | None = None,
@@ -415,9 +724,10 @@ def update_telegram_roles_in_cache_sync(
 ) -> tuple[set[int], set[int]]:
     managers = set(current_manager_user_ids)
     users = set(current_authorized_user_ids)
+    super_admin_ids = set(admin_user_id) if isinstance(admin_user_id, set) else ({admin_user_id} if admin_user_id is not None else set())
 
     def ensure_not_super_admin(uid: int) -> None:
-        if admin_user_id is not None and int(uid) == admin_user_id:
+        if int(uid) in super_admin_ids:
             raise ValueError("超级管理员只允许通过环境变量管理")
 
     if add_authorized_user_id is not None:
@@ -453,14 +763,13 @@ def update_telegram_roles_in_cache_sync(
             managers.discard(target)
             users.discard(target)
 
-    if admin_user_id is not None:
-        managers.discard(admin_user_id)
-        users.discard(admin_user_id)
+    managers.difference_update(super_admin_ids)
+    users.difference_update(super_admin_ids)
     users.difference_update(managers)
     auth_roles_save_sync(cache_path, managers, users)
     return managers, users
 
-def update_authorized_users_in_cache_sync(cache_path: Path, admin_user_id: int | None, current_manager_user_ids: set[int], current_authorized_user_ids: set[int], add_user_id: int | None = None, remove_user_ids: set[int] | None = None) -> set[int]:
+def update_authorized_users_in_cache_sync(cache_path: Path, admin_user_id: int | set[int] | None, current_manager_user_ids: set[int], current_authorized_user_ids: set[int], add_user_id: int | None = None, remove_user_ids: set[int] | None = None) -> set[int]:
     _, users = update_telegram_roles_in_cache_sync(
         cache_path,
         admin_user_id,
@@ -547,7 +856,7 @@ def default_allowlist_notification_chats_sync(cache_path: Path, cfg: AppConfig, 
     """Notifications in DEFAULT_ALLOWLIST_NOTIFICATION_KINDS are enabled for Telegram allowlist unless explicitly disabled."""
     if kind == "version_update":
         chats: list[str] = []
-        for admin_uid in sorted(cfg.telegram.admin_user_ids):
+        for admin_uid in sorted(cfg.telegram.super_admin_user_ids):
             admin_chat = str(admin_uid)
             if notification_status_sync(cache_path, admin_chat, DEFAULT_ALLOWLIST_NOTIFICATION_KINDS).get(kind):
                 chats.append(admin_chat)
@@ -582,7 +891,134 @@ def ip_alert_notification_chat_modes_sync(cache_path: Path, cfg: AppConfig) -> d
 def alert_global_period_sync(cache_path: Path, alert_type: str) -> str:
     key = "traffic_alert_global_period" if alert_type == "traffic" else "ip_alert_global_period"
     value = alert_state_get_sync(cache_path, key)
-    return value if value in ALERT_PERIOD_LABELS else ALERT_DEFAULT_PERIOD
+    default_period = TRAFFIC_ALERT_DEFAULT_PERIOD if alert_type == "traffic" else ALERT_DEFAULT_PERIOD
+    return value if value in ALERT_PERIOD_LABELS else default_period
+
+def initialization_mark_started_sync(cache_path: Path, reason: str = "startup") -> None:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    with cache_connect(cache_path) as conn:
+        set_collector_state(conn, "initialization_status", "running", now_ts)
+        set_collector_state(conn, "initialization_started_at", str(now_ts), now_ts)
+        set_collector_state(conn, "initialization_reason", reason, now_ts)
+        conn.execute("DELETE FROM collector_state WHERE key = 'initialization_completed_at'")
+
+def initialization_mark_complete_sync(cache_path: Path, records_count: int, geo_total: int, geo_success: int, geo_failed: int) -> None:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    payload = {"records": int(records_count), "geo_total": int(geo_total), "geo_success": int(geo_success), "geo_failed": int(geo_failed)}
+    with cache_connect(cache_path) as conn:
+        set_collector_state(conn, "initialization_status", "awaiting_ack", now_ts)
+        set_collector_state(conn, "initialization_completed_at", str(now_ts), now_ts)
+        set_collector_state(conn, "initialization_result", json.dumps(payload, ensure_ascii=False), now_ts)
+
+def initialization_acknowledge_sync(cache_path: Path) -> None:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    with cache_connect(cache_path) as conn:
+        set_collector_state(conn, "initialization_status", "complete", now_ts)
+        set_collector_state(conn, "initialization_acknowledged_at", str(now_ts), now_ts)
+
+def initialization_status_sync(cache_path: Path, queries_per_minute: int = DEFAULT_IP_GEO_QUERIES_PER_MINUTE) -> dict[str, Any]:
+    init_cache(cache_path)
+    with cache_connect(cache_path) as conn:
+        active_ips = int(conn.execute("SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
+        geo_total = int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0)
+        geo_pending = int(conn.execute(
+            """
+            SELECT COUNT(*) FROM ip_geo_cache
+            WHERE (queried_at IS NULL OR queried_at <= 0)
+              AND (raw IS NULL OR raw = '')
+            """
+        ).fetchone()[0] or 0)
+        geo_finished = int(conn.execute(
+            """
+            SELECT COUNT(*) FROM ip_geo_cache
+            WHERE queried_at IS NOT NULL AND queried_at > 0
+            """
+        ).fetchone()[0] or 0)
+        geo_no_result = int(conn.execute(
+            """
+            SELECT COUNT(*) FROM ip_geo_cache
+            WHERE queried_at IS NOT NULL AND queried_at > 0
+              AND (raw IS NOT NULL AND raw <> '')
+              AND (country IS NULL OR country = '')
+              AND (region IS NULL OR region = '')
+              AND (city IS NULL OR city = '')
+            """
+        ).fetchone()[0] or 0)
+    status_state = get_collector_state_sync(cache_path, "initialization_status")
+    started_state = get_collector_state_sync(cache_path, "initialization_started_at")
+    completed_state = get_collector_state_sync(cache_path, "initialization_completed_at")
+    reset_state = get_collector_state_sync(cache_path, "cache_reset_at")
+    collect_state = get_collector_state_sync(cache_path, "last_collect_at")
+    status = status_state[0] if status_state else "complete"
+    reset_ts = int(reset_state[0]) if reset_state and str(reset_state[0]).isdigit() else None
+    completed_ts = int(completed_state[0]) if completed_state and str(completed_state[0]).isdigit() else None
+    if reset_ts and (not completed_ts or completed_ts < reset_ts):
+        status = "running"
+    elif status == "running" and geo_pending <= 0 and collect_state:
+        status = "awaiting_ack"
+    pending = int(geo_pending)
+    initializing = status != "complete"
+    return {
+        "status": status,
+        "initializing": initializing,
+        "awaiting_ack": status == "awaiting_ack",
+        "started_at": int(started_state[0]) if started_state and str(started_state[0]).isdigit() else None,
+        "completed_at": completed_ts,
+        "last_collect_at": collect_state[1] if collect_state else None,
+        "active_ips": int(active_ips),
+        "geo_total": int(geo_total),
+        "geo_finished": int(geo_finished),
+        "geo_no_result": int(geo_no_result),
+        "geo_pending": pending,
+        "estimated_remaining_seconds": int((pending * 60 + max(1, int(queries_per_minute)) - 1) // max(1, int(queries_per_minute))) if pending > 0 else 0,
+    }
+
+def initialization_progress_text_sync(cache_path: Path, cfg: AppConfig) -> str:
+    status = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
+    if status.get("awaiting_ack"):
+        elapsed = None
+        if status.get("started_at") and status.get("completed_at"):
+            elapsed = max(0, int(status["completed_at"]) - int(status["started_at"]))
+        lines = [
+            "✅ <b>Xbot 初始化已完成</b>",
+            "────────────",
+            f"采集 IP：{status['active_ips']} 条",
+            f"查询 IP：{status['geo_finished']}/{status['geo_total']}",
+        ]
+        if status.get("geo_no_result", 0) > 0:
+            lines.append(f"无可用归属地/查询失败：{status['geo_no_result']} 条")
+        if elapsed is not None:
+            lines.append(f"使用时间：{format_duration(elapsed)}")
+        if status.get("completed_at"):
+            lines.append(f"完成时间：{format_timestamp(status['completed_at'])}")
+        lines.extend(["", "请确认以上结果。点击下方按钮后，将进入主菜单并开始允许 IP 告警判断。"])
+        return "\n".join(lines)
+    lines = [
+        "⏳ <b>正在初始化 Xbot 缓存</b>",
+        "────────────",
+        "首次使用或重置本地缓存后，需要先完成 Redis IP 采集与 IP 归属地查询。",
+        "初始化完成前，暂时只显示进度，避免面板和告警基于不完整数据判断。",
+        "",
+        f"采集 IP：{status['active_ips']} 条",
+        f"查询 IP：{status['geo_finished']}/{status['geo_total']}",
+    ]
+    if status["geo_pending"] > 0:
+        lines.append("当前状态：等待查询或限流重试")
+    if status.get("geo_no_result", 0) > 0:
+        lines.append(f"已处理但无可用归属地：{status['geo_no_result']} 条（不阻塞初始化）")
+    if status["geo_pending"] > 0:
+        lines.append(f"预计剩余：约 {format_duration(status['estimated_remaining_seconds'])}")
+    else:
+        lines.append("预计剩余：等待下一轮采集确认")
+    if status.get("started_at"):
+        lines.append(f"开始时间：{format_timestamp(status['started_at'])}")
+    if status.get("last_collect_at"):
+        lines.append(f"最近采集：{format_timestamp(status['last_collect_at'])}")
+    lines.extend(["", "请稍后刷新。短期限流会自动等待并重试；不会把限流误判为查询失败。"])
+    return "\n".join(lines)
 
 def alert_set_global_period_sync(cache_path: Path, alert_type: str, period: str) -> str:
     if period not in ALERT_PERIOD_LABELS:
@@ -1074,9 +1510,12 @@ def reset_local_cache_sync(cache_path: Path) -> dict[str, int]:
         ):
             conn.execute(f"DELETE FROM {table}")
         conn.execute(
-            "DELETE FROM collector_state WHERE key IN ('first_collect_at', 'last_collect_at', 'last_traffic_sample_at', 'stats_floor_at', 'last_active_ip_records_cleared_at')"
+            "DELETE FROM collector_state WHERE key IN ('first_collect_at', 'last_collect_at', 'last_traffic_sample_at', 'stats_floor_at', 'last_active_ip_records_cleared_at', 'initialization_completed_at', 'initialization_result')"
         )
         set_collector_state(conn, "cache_reset_at", str(now_ts), now_ts)
+        set_collector_state(conn, "initialization_status", "running", now_ts)
+        set_collector_state(conn, "initialization_started_at", str(now_ts), now_ts)
+        set_collector_state(conn, "initialization_reason", "cache_reset", now_ts)
     return counts
 
 def list_all_cached_user_buttons_sync(cache_path: Path) -> list[tuple[int, str]]:
@@ -1161,13 +1600,15 @@ def clear_user_ip_records_multi_sync(cache_path: Path, user_ids: list[int]) -> d
 def get_cache_counts_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        active_ips = int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
+        active_ip_records = int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
+        active_ips = int(conn.execute("SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
         users = int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] or 0)
         geo_total = int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0)
         traffic_samples = int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples").fetchone()[0] or 0)
         pinned_dashboards = int(conn.execute("SELECT COUNT(*) FROM pinned_dashboard_messages").fetchone()[0] or 0)
     return {
         "active_ips": active_ips,
+        "active_ip_records": active_ip_records,
         "users": users,
         "geo_total": geo_total,
         "traffic_samples": traffic_samples,
@@ -1658,15 +2099,11 @@ def list_user_ips_from_cache_sync(
             "🗺 <b>自定区间用户活跃度概览</b>",
             f"时间区间：{datetime.fromtimestamp(start_ts).strftime('%Y-%m-%d %H:%M')} - {datetime.fromtimestamp(end_ts).strftime('%Y-%m-%d %H:%M')}",
             "────────────",
-            PROXY_PROTOCOL_NOTICE,
-            "",
         ]
     else:
         lines = [
             f"🌐 <b>{label} 用户活跃度概览</b>",
             "────────────",
-            PROXY_PROTOCOL_NOTICE,
-            "",
         ]
     if not ordered_user_ids:
         lines.extend([
@@ -1883,7 +2320,7 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 key = geo_area_key(row)
                 if not key:
                     continue
-                label = str(row["display"] or "").strip() or geo_area_rule_label(key)
+                label = geo_area_display_label(row, key)
                 items.append({"value": key, "label": label, "sub": f"{int(row['ip_count'] or 0)} IP / {int(row['user_count'] or 0)} 用户", "last_seen_at": int(row["last_seen_at"] or 0)})
             return items
         if dimension == "asn":
@@ -2032,6 +2469,5 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
                     """,
                     [(now_ts, user_id, ip) for user_id, ip in targets],
                 )
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

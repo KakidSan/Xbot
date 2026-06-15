@@ -1,6 +1,14 @@
 from __future__ import annotations
-from ._bootstrap import install_module_symbols
+
 from .common import *
+from .config import *
+from .db.cache import *
+from .db.redis import *
+from .db.mysql import *
+from .geo import *
+from .alerts import *
+from .bot.formatters import *
+from .bot.keyboards import *
 
 def run_cache_collection_once(cfg: AppConfig, cache_path: Path) -> tuple[bool, str, bool, str, int, int, int]:
     init_cache(cache_path)
@@ -34,6 +42,15 @@ def run_cache_collection_once(cfg: AppConfig, cache_path: Path) -> tuple[bool, s
             "后台 IP 归属地自动补全：本轮待处理 %s 个，成功 %s 个，失败 %s 个，剩余 %s 个",
             geo_total, geo_success, geo_failed, pending_after,
         )
+        init_status = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
+        if init_status.get("initializing") and pending_after <= 0:
+            initialization_mark_complete_sync(cache_path, len(records), geo_total, geo_success, geo_failed)
+            log.info("后台初始化完成：Redis IP 记录 %s 条，归属地待处理已清零", len(records))
+    else:
+        init_status = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
+        if init_status.get("initializing") and init_status.get("geo_pending", 0) <= 0 and records:
+            initialization_mark_complete_sync(cache_path, len(records), 0, 0, 0)
+            log.info("后台初始化完成：Redis IP 记录 %s 条，无待补全归属地", len(records))
     log.info("缓存采集完成：Redis IP 记录 %s 条，用户 %s 个", len(records), len(user_ids))
     return True, "", mysql_ok, mysql_detail, geo_total, geo_success, geo_failed
 
@@ -237,6 +254,10 @@ async def traffic_dashboard_refresh_loop(
 def initialize_cache_before_notifications_sync(cfg: AppConfig, cache_path: Path) -> tuple[bool, str, bool, str, int, int, int]:
     """Collect active IPs and finish geo lookup before starting judgment/notification loops."""
     init_cache(cache_path)
+    init_status_before = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
+    require_ack = bool(init_status_before.get("initializing"))
+    if require_ack:
+        initialization_mark_started_sync(cache_path, "startup")
     records = collect_redis_ip_records_sync(cfg.redis)
     if isinstance(records, str):
         log.warning("启动初始化缓存采集 Redis 失败：%s", records)
@@ -258,7 +279,8 @@ def initialize_cache_before_notifications_sync(cfg: AppConfig, cache_path: Path)
         "启动初始化缓存采集完成：Redis IP 记录 %s 条，用户 %s 个，归属地待处理 %s 个，成功 %s 个，失败 %s 个",
         len(records), len(user_ids), geo_total, geo_success, geo_failed,
     )
+    if require_ack:
+        initialization_mark_complete_sync(cache_path, len(records), geo_total, geo_success, geo_failed)
     return True, "", mysql_ok, mysql_detail, geo_total, geo_success, geo_failed
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

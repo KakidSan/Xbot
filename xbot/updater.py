@@ -1,6 +1,9 @@
 from __future__ import annotations
-from ._bootstrap import install_module_symbols
+
 from .common import *
+from .db.cache import *
+from .bot.keyboards import *
+from .bot.formatters import *
 
 def run_command_sync(args: list[str], cwd: Path = APP_DIR, timeout: int = 20) -> tuple[int, str, str]:
     try:
@@ -239,7 +242,7 @@ async def version_update_check_loop(app: Application, cfg: AppConfig, cache_path
                     chats = await asyncio.to_thread(default_allowlist_notification_chats_sync, cache_path, cfg, "version_update")
                     for chat_id in chats:
                         try:
-                            admin_view = str(chat_id) == str(cfg.telegram.admin_user_id)
+                            admin_view = str(chat_id) in {str(uid) for uid in cfg.telegram.super_admin_user_ids}
                             await app.bot.send_message(chat_id=chat_id, text=version_update_notice_text(check), parse_mode="HTML", reply_markup=version_keyboard(check, admin_view=admin_view))
                         except Exception as exc:
                             log.warning("发送版本更新通知失败 chat=%s：%s", chat_id, exc)
@@ -250,6 +253,5 @@ async def version_update_check_loop(app: Application, cfg: AppConfig, cache_path
             await asyncio.wait_for(stop_event.wait(), timeout=60)
         except asyncio.TimeoutError:
             continue
-
-
-install_module_symbols(globals())
+# Export this module's own public symbols for downstream star imports.
+__all__ = [name for name in globals() if not name.startswith("_")]

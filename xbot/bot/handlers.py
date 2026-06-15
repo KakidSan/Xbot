@@ -41,6 +41,7 @@ from ..common import (
     timedelta,
 )
 from ..config import AppConfig, build_config_from_env
+from .context import BotContext
 from ..db.cache import (
     active_user_button_items_from_cache_sync,
     actor_name_from_user,
@@ -233,7 +234,8 @@ async def edit_or_replace_status_any(
             await update.effective_message.reply_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
 
 def build_application(cfg: AppConfig, cache_path: Path) -> Application:
-    app = Application.builder().token(cfg.telegram.bot_token).build()
+    bot_ctx = BotContext(cfg=cfg, cache_path=cache_path)
+    app = Application.builder().token(bot_ctx.cfg.telegram.bot_token).build()
 
     def back_close_row(back_callback: str = "main_menu", back_text: str = "⬅️ 返回主菜单") -> list[InlineKeyboardButton]:
         return [
@@ -3683,9 +3685,10 @@ async def run_once(
     stop_event: asyncio.Event,
 ) -> None:
     cache_path = resolve_cache_path(cfg.cache_path, APP_DIR)
-    init_cache(cache_path)
+    bot_ctx = BotContext(cfg=cfg, cache_path=cache_path)
+    init_cache(bot_ctx.cache_path)
 
-    app = build_application(cfg, cache_path)
+    app = build_application(bot_ctx.cfg, bot_ctx.cache_path)
     collector_stop_event = asyncio.Event()
     collector_task: asyncio.Task[Any] | None = None
     sampler_stop_event = asyncio.Event()
@@ -3712,14 +3715,14 @@ async def run_once(
         await notify_collector_health_transition(app, cfg, cache_path, "ip_api", False, f"启动初始化 IP 归属地补全失败 {geo_failed} 个。")
     await check_ip_alerts(app, cfg, cache_path)
     await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-    await cleanup_legacy_traffic_dashboard_messages(app, cache_path)
-    collector_task = asyncio.create_task(cache_collector_loop(app, cfg, cache_path, collector_stop_event))
-    sampler_task = asyncio.create_task(traffic_sampler_loop(app, cfg, cache_path, sampler_stop_event))
-    dashboard_task = asyncio.create_task(traffic_dashboard_refresh_loop(app, cfg, cache_path, dashboard_stop_event))
-    report_task = asyncio.create_task(traffic_report_push_loop(app, cache_path, report_stop_event))
-    version_task = asyncio.create_task(version_update_check_loop(app, cfg, cache_path, version_stop_event))
+    await cleanup_legacy_traffic_dashboard_messages(app, bot_ctx.cache_path)
+    collector_task = asyncio.create_task(cache_collector_loop(app, bot_ctx.cfg, bot_ctx.cache_path, collector_stop_event))
+    sampler_task = asyncio.create_task(traffic_sampler_loop(app, bot_ctx.cfg, bot_ctx.cache_path, sampler_stop_event))
+    dashboard_task = asyncio.create_task(traffic_dashboard_refresh_loop(app, bot_ctx.cfg, bot_ctx.cache_path, dashboard_stop_event))
+    report_task = asyncio.create_task(traffic_report_push_loop(app, bot_ctx.cache_path, report_stop_event))
+    version_task = asyncio.create_task(version_update_check_loop(app, bot_ctx.cfg, bot_ctx.cache_path, version_stop_event))
     await send_update_result_notice(app)
-    log.info("Telegram Bot 已启动，缓存文件：%s", cache_path)
+    log.info("Telegram Bot 已启动，缓存文件：%s", bot_ctx.cache_path)
 
     try:
         await stop_event.wait()

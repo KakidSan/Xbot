@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from ..common import (
+from ...common import (
     APP_DIR,
     Any,
     Application,
@@ -40,8 +40,8 @@ from ..common import (
     sqlite3,
     timedelta,
 )
-from ..config import AppConfig, build_config_from_env
-from .authorization import (
+from ...config import AppConfig, build_config_from_env
+from ..authorization import (
     auth_user_ids_to_labels as auth_user_ids_to_labels_from_cache,
     authorization_delete_confirm_keyboard as authorization_delete_confirm_keyboard_for_cfg,
     authorization_delete_keyboard as authorization_delete_keyboard_for_cfg,
@@ -51,8 +51,8 @@ from .authorization import (
     telegram_authorization_list_text_sync as telegram_authorization_list_text_for_cfg,
     telegram_user_label_sync as telegram_user_label_from_cache,
 )
-from .context import BotContext
-from .menus import (
+from ..context import BotContext
+from ..menus import (
     back_close_row,
     clear_history_confirm_keyboard,
     cover_config_keyboard,
@@ -69,7 +69,7 @@ from .menus import (
     reset_user_ip_multi_confirm_keyboard,
     traffic_management_keyboard,
 )
-from .operation_logs import (
+from ..operation_logs import (
     log_operation_from_query as log_operation_from_query_with_cache,
     log_operation_from_update as log_operation_from_update_with_cache,
     operation_log_detail_keyboard,
@@ -78,9 +78,9 @@ from .operation_logs import (
     operation_logs_menu_keyboard,
     operation_logs_summary_keyboard,
 )
-from .operation_details import alert_category, alert_setting_before_after_detail, auth_change_detail, ip_ignore_detail
-from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
-from ..db.cache import (
+from ..operation_details import alert_category, alert_setting_before_after_detail, auth_change_detail, ip_ignore_detail
+from ..version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
+from ...db.cache import (
     active_user_button_items_from_cache_sync,
     actor_name_from_user,
     alert_global_period_sync,
@@ -142,9 +142,9 @@ from ..db.cache import (
     update_telegram_roles_in_cache_sync,
     upsert_all_cache_users,
 )
-from ..geo import ignored_rules_text_sync
-from ..alerts import check_ip_alerts
-from ..collector import (
+from ...geo import ignored_rules_text_sync
+from ...alerts import check_ip_alerts
+from ...collector import (
     cache_collector_loop,
     cleanup_legacy_traffic_dashboard_messages,
     initialize_cache_before_notifications_sync,
@@ -153,8 +153,8 @@ from ..collector import (
     traffic_report_push_loop,
     traffic_sampler_loop,
 )
-from ..updater import send_update_result_notice, version_update_check_loop
-from .formatters import (
+from ...updater import send_update_result_notice, version_update_check_loop
+from ..formatters import (
     alert_global_setting_text_sync,
     alert_summary_sync,
     alert_user_setting_text_sync,
@@ -168,7 +168,7 @@ from .formatters import (
     traffic_dashboard_text_from_kind_sync,
     user_display,
 )
-from .keyboards import (
+from ..keyboards import (
     alert_global_keyboard,
     alert_menu_keyboard,
     alert_user_list_keyboard,
@@ -285,161 +285,16 @@ async def edit_or_replace_status_any(
         if update.effective_message:
             await update.effective_message.reply_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
 
-async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, reply_main_menu, delete_trigger_command_message) -> None:
-    await reply_main_menu(update, context, cfg)
-    await delete_trigger_command_message(update)
 
-async def handle_clear_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, track_auto_delete_message) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    sent = await update.effective_message.reply_text(
-        "👋🏻 <b>清除对话记录</b>\n────────────\n将尝试清空当前对话记录。\n此操作不可恢复。\n\n⚠️ 确认要继续吗？",
-        parse_mode="HTML",
-        reply_markup=clear_history_confirm_keyboard(),
-    )
-    await track_auto_delete_message(sent)
 
-async def handle_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, track_auto_delete_message) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    text = await asyncio.to_thread(bot_status_text_sync, cfg, cache_path)
-    sent = await update.effective_message.reply_text(text, parse_mode="HTML")
-    await track_auto_delete_message(sent)
 
-async def handle_health_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, track_auto_delete_message, reply_long_text) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    status_message = await update.effective_message.reply_text("正在执行健康检查，请稍候...")
-    await track_auto_delete_message(status_message)
-    admin_view = is_admin_user_id(update.effective_user.id if update.effective_user else None, cfg)
-    text = await asyncio.to_thread(bot_health_overview_text_sync, cfg, cache_path, admin_view)
-    if len(text) <= 3900:
-        await edit_or_replace_status(status_message, text, update, parse_mode="HTML")
-        await track_auto_delete_message(status_message)
-    else:
-        try:
-            await status_message.delete()
-        except BadRequest:
-            pass
-        await reply_long_text(update.effective_message, text, parse_mode="HTML")
 
-async def handle_traffic_daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, track_auto_delete_message) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    sent = await update.effective_message.reply_text("🌊 请选择统计周期：", reply_markup=traffic_period_keyboard())
-    await track_auto_delete_message(sent)
 
-async def handle_traffic_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, send_or_jump_traffic_dashboard) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    await send_or_jump_traffic_dashboard(update.effective_message, "users_preset_24h")
 
-async def handle_traffic_nodes_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, send_or_jump_traffic_dashboard) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    await send_or_jump_traffic_dashboard(update.effective_message, "nodes_preset_24h")
 
-async def handle_active_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, track_auto_delete_message) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    init_status = await asyncio.to_thread(initialization_status_sync, cache_path, cfg.ip_geo_queries_per_minute)
-    if init_status.get("initializing"):
-        sent = await update.effective_message.reply_text(
-            await asyncio.to_thread(initialization_progress_text_sync, cache_path, cfg),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 刷新初始化进度", callback_data="main_menu")]]),
-        )
-        await track_auto_delete_message(sent)
-        return
-    sent = await update.effective_message.reply_text("🌐 请选择在线记录统计周期：", reply_markup=active_users_keyboard())
-    await track_auto_delete_message(sent)
 
-async def handle_close_message_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig) -> None:
-    query = update.callback_query
-    if not query or not query.message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await query.answer("未授权", show_alert=True)
-        return
-    await query.answer("已关闭")
-    try:
-        await query.message.delete()
-    except BadRequest:
-        pass
 
-async def handle_detail_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, answer_callback_silently, show_callback_page) -> None:
-    query = update.callback_query
-    if not query or not query.message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await query.answer("未授权", show_alert=True)
-        return
-    periods = {
-        "1h": ("近 1 小时", timedelta(hours=1)),
-        "24h": ("近 24 小时", timedelta(hours=24)),
-        "7d": ("近 7 天", timedelta(days=7)),
-        "30d": ("近 30 天", timedelta(days=30)),
-    }
-    target = (query.data or "").split(":", 1)[-1]
-    await answer_callback_silently(query)
-    if target in periods:
-        label, window = periods[target]
-        result = await asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window)
-        await show_callback_page(query, result, active_users_keyboard(target), parse_mode="HTML")
-        return
-    await show_callback_page(query, "🌐 请选择在线记录统计周期：", active_users_keyboard())
 
-async def handle_user_ip_query_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, track_auto_delete_message) -> None:
-    if not update.effective_message:
-        return
-    if not is_allowed(update, cfg):
-        if is_bot_self_update(update, cfg):
-            return
-        await reply_connection_status(update, cfg)
-        return
-    context.user_data["awaiting_user_ip_query_id"] = True
-    context.user_data.pop("user_ip_query_period", None)
-    sent = await update.effective_message.reply_text("🔎 请输入要查询的用户 ID，例如：1")
-    await track_auto_delete_message(sent)
 
 async def handle_active_users_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, show_initialization_gate, answer_callback_silently, show_callback_page, open_dashboard_card) -> None:
     query = update.callback_query
@@ -2666,45 +2521,37 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
 
 
-    app.add_handler(CommandHandler("start", partial(handle_start_command, cfg=cfg, reply_main_menu=reply_main_menu, delete_trigger_command_message=delete_trigger_command_message)))
-    app.add_handler(CommandHandler("clear_history", partial(handle_clear_history_command, cfg=cfg, track_auto_delete_message=track_auto_delete_message)))
-    app.add_handler(CommandHandler(
-        "version",
-        lambda update, context: handle_version_command(
-            update,
-            context,
-            bot_ctx,
-            reply_cover_card,
-            edit_or_replace_status_any,
-            delete_trigger_command_message,
-            reply_connection_status,
-        ),
-    ))
-    app.add_handler(CommandHandler("status", partial(handle_status_command, cfg=cfg, cache_path=cache_path, track_auto_delete_message=track_auto_delete_message)))
-    app.add_handler(CommandHandler("health", partial(handle_health_command, cfg=cfg, cache_path=cache_path, track_auto_delete_message=track_auto_delete_message, reply_long_text=reply_long_text)))
-    app.add_handler(CommandHandler("active_users", partial(handle_active_users_command, cfg=cfg, cache_path=cache_path, track_auto_delete_message=track_auto_delete_message)))
-    app.add_handler(CommandHandler("user_ip_query", partial(handle_user_ip_query_command, cfg=cfg, track_auto_delete_message=track_auto_delete_message)))
-    app.add_handler(CommandHandler("traffic_daily", partial(handle_traffic_daily_command, cfg=cfg, track_auto_delete_message=track_auto_delete_message)))
-    app.add_handler(CommandHandler("traffic_users", partial(handle_traffic_users_command, cfg=cfg, send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard)))
-    app.add_handler(CommandHandler("traffic_nodes", partial(handle_traffic_nodes_command, cfg=cfg, send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard)))
-    app.add_handler(CallbackQueryHandler(
-        lambda update, context: handle_version_update_callback(
-            update,
-            context,
-            bot_ctx,
-            show_callback_page,
-            answer_callback_silently,
-        ),
-        pattern=r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$",
-    ))
-    app.add_handler(CallbackQueryHandler(partial(handle_main_menu_callback, cfg=cfg, bot_ctx=bot_ctx, cache_path=cache_path, cache_retention_text_sync=cache_retention_text_sync, cache_retention_preview_text=cache_retention_preview_text, show_initialization_gate=show_initialization_gate, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page, send_start_menu=send_start_menu, open_dashboard_card=open_dashboard_card, purge_chat_history=purge_chat_history, resolve_telegram_user_label=resolve_telegram_user_label, reply_long_text=reply_long_text), pattern=r"^main_menu(?::(init_ack|clear_history|clear_history_confirm|system_check|system_check_refresh|status_notice|traffic_management|traffic_users|traffic_nodes|traffic_alerts|op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?|auth(?::(?:add|delete|del_done|del_toggle:\d+|del_confirm|roles|role_toggle:\d+|role_save))?|ip_monitor(?::(?:period|user_query|ignore|ignored_rules:\d+|ignored_rule_toggle:\d+:[A-Za-z0-9]+|ignore:(?:area|asn|cidr):\d+|ignore_toggle:(?:area|asn|cidr):\d+:[A-Za-z0-9]+))?|noop|parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?|notifications(?::(?:daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update))?|debug_tools|debug:reset_cache|debug:reset_cache_now|debug:reset_cache_now_confirm|debug:reset_cache_floor|debug:reset_user_ip|debug:reset_user_ip_page:\d+|debug:reset_user_ip_toggle:\d+:\d+|debug:reset_user_ip_done|debug:reset_user_ip_multi_confirm))?$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_alert_callback, cfg=cfg, bot_ctx=bot_ctx, cache_path=cache_path, show_initialization_gate=show_initialization_gate, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page, mark_no_auto_delete_message=mark_no_auto_delete_message), pattern=r"^(alert_menu:(?:traffic|ip)|alert_period_page:(?:traffic|ip):\d+|alert_global_period_page:(?:traffic|ip)|alert_global:(?:traffic|ip)(?::(?:custom|period:(?:1h|24h|7d|today|week)))?|alert_users:(?:traffic|ip):\d+|alert_user:(?:traffic|ip):\d+(?::alert)?|alert_set:(?:traffic|ip):(?:custom:\d+|period:(?:1h|24h|7d|today|week):\d+|threshold:\d+:\d+|whitelist:\d+|reset:\d+))$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_traffic_daily_callback, cfg=cfg, bot_ctx=bot_ctx, cache_path=cache_path, show_initialization_gate=show_initialization_gate, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page, send_dashboard_card=send_dashboard_card, edit_dashboard_card=edit_dashboard_card, open_traffic_dashboard_message=open_traffic_dashboard_message, switch_traffic_dashboard_message=switch_traffic_dashboard_message), pattern=r"^(traffic_menu(?::[A-Za-z0-9_]+)?|traffic_back:[A-Za-z0-9_]+|traffic_(?:period|switch):(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(?:users|nodes))?|ip_custom:start|traffic_custom:(start(?::(?:combined|users|nodes))?|now|(year|month|day|hour|minute):\d+|back:(year|month|day|hour))|traffic_floor:(start|confirm:\d+)|traffic_dashboard:(pin|unpin|delete):[A-Za-z0-9_]+)$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_active_users_callback, cfg=cfg, cache_path=cache_path, show_initialization_gate=show_initialization_gate, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page, open_dashboard_card=open_dashboard_card), pattern=r"^(active_users(?::|_query:)(1h|24h|7d|30d)(?::\d+)?|ip_user_query:(?:(1h|24h|7d|30d)|custom:\d+:\d+)|user_ip_page:\d+:\d+:(?:all|(?:1h|24h|7d|30d)|custom:\d+:\d+)|active_user_detail:(1h|24h|7d|30d):\d+|active_users_cancel:(1h|24h|7d|30d)|noop)$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_ip_detail_callback, cfg=cfg, bot_ctx=bot_ctx, cache_path=cache_path, show_initialization_gate=show_initialization_gate, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page, mark_no_auto_delete_message=mark_no_auto_delete_message), pattern=r"^(?:ip_(?:detail_list|active_user_detail):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):(\d+)(?::\d+)?(?::alert)?|ip_alert_notice:\d+|ip_ignore_menu:(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+(?::alert)?|ip_ignore_page:(?:area|asn|cidr):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+:\d+(?::alert)?|ip_ig_t:[A-Za-z0-9]+|ip_ignore_toggle:(?:area|asn|cidr):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+:\d+:[A-Za-z0-9]+(?::alert)?)$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_detail_back_callback, cfg=cfg, cache_path=cache_path, answer_callback_silently=answer_callback_silently, show_callback_page=show_callback_page), pattern=r"^detail_back:(1h|24h|7d|30d|menu)$"))
-    app.add_handler(CallbackQueryHandler(partial(handle_close_message_callback, cfg=cfg), pattern=r"^close_message$"))
-    app.add_handler(MessageHandler(filters.ALL, partial(handle_fallback_message, cfg=cfg, bot_ctx=bot_ctx, cache_path=cache_path, track_auto_delete_message=track_auto_delete_message, reply_cover_card=reply_cover_card, resolve_telegram_user_label=resolve_telegram_user_label, context_bot_delete_message=context_bot_delete_message, edit_global_alert_prompt=edit_global_alert_prompt, edit_alert_prompt=edit_alert_prompt)))
+    from ..router import register_handlers
+
+    register_handlers(
+        app,
+        bot_ctx,
+        reply_main_menu=reply_main_menu,
+        delete_trigger_command_message=delete_trigger_command_message,
+        track_auto_delete_message=track_auto_delete_message,
+        reply_cover_card=reply_cover_card,
+        edit_or_replace_status_any=edit_or_replace_status_any,
+        reply_connection_status=reply_connection_status,
+        reply_long_text=reply_long_text,
+        send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard,
+        show_callback_page=show_callback_page,
+        answer_callback_silently=answer_callback_silently,
+        cache_retention_text_sync=cache_retention_text_sync,
+        cache_retention_preview_text=cache_retention_preview_text,
+        show_initialization_gate=show_initialization_gate,
+        send_start_menu=send_start_menu,
+        open_dashboard_card=open_dashboard_card,
+        purge_chat_history=purge_chat_history,
+        resolve_telegram_user_label=resolve_telegram_user_label,
+        mark_no_auto_delete_message=mark_no_auto_delete_message,
+        send_dashboard_card=send_dashboard_card,
+        edit_dashboard_card=edit_dashboard_card,
+        open_traffic_dashboard_message=open_traffic_dashboard_message,
+        switch_traffic_dashboard_message=switch_traffic_dashboard_message,
+        context_bot_delete_message=context_bot_delete_message,
+        edit_global_alert_prompt=edit_global_alert_prompt,
+        edit_alert_prompt=edit_alert_prompt,
+    )
     return app
 
 async def run_once(

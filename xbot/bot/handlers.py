@@ -41,6 +41,16 @@ from ..common import (
     timedelta,
 )
 from ..config import AppConfig, build_config_from_env
+from .authorization import (
+    auth_user_ids_to_labels as auth_user_ids_to_labels_from_cache,
+    authorization_delete_confirm_keyboard as authorization_delete_confirm_keyboard_for_cfg,
+    authorization_delete_keyboard as authorization_delete_keyboard_for_cfg,
+    authorization_manage_keyboard as authorization_manage_keyboard_for_cfg,
+    authorization_role_change_keyboard as authorization_role_change_keyboard_for_cfg,
+    authorization_role_change_text as authorization_role_change_text_for_cfg,
+    telegram_authorization_list_text_sync as telegram_authorization_list_text_for_cfg,
+    telegram_user_label_sync as telegram_user_label_from_cache,
+)
 from .context import BotContext
 from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 from ..db.cache import (
@@ -235,22 +245,10 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         ]
 
     def telegram_user_label_sync(uid: int) -> str:
-        cached = ui_pref_get_sync(cache_path, uid, "telegram_label")
-        return str(cached or f"用户 {uid}")
+        return telegram_user_label_from_cache(cache_path, uid)
 
     def telegram_authorization_list_text_sync() -> str:
-        lines = ["🔑 <b>授权管理</b>", "────────────", "当前用户列表："]
-        super_admin_ids = sorted(cfg.telegram.super_admin_user_ids)
-        for uid in super_admin_ids:
-            lines.append(f"• 👑 <b>{html.escape(telegram_user_label_sync(uid))}</b> (<code>{uid}</code>)")
-        for uid in sorted(cfg.telegram.manager_user_ids):
-            lines.append(f"• 👑 {html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
-        for uid in sorted(cfg.telegram.authorized_user_ids):
-            lines.append(f"• 🎩 {html.escape(telegram_user_label_sync(uid))} (<code>{uid}</code>)")
-        if not super_admin_ids and not cfg.telegram.manager_user_ids and not cfg.telegram.authorized_user_ids:
-            lines.append("暂无授权用户。")
-        lines.extend(["", "说明：超级管理员只能通过环境变量修改。"])
-        return "\n".join(lines)
+        return telegram_authorization_list_text_for_cfg(cfg, cache_path)
 
     async def resolve_telegram_user_label(uid: int) -> str:
         try:
@@ -337,19 +335,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         return f"{icon} {action}" if icon and not action.startswith(icon) else action
 
     def auth_user_ids_to_labels(value: str) -> str:
-        raw = value.strip()
-        if not raw or raw == "空":
-            return raw or "空"
-        labels: list[str] = []
-        for item in raw.split(","):
-            item = item.strip()
-            if not item:
-                continue
-            if item.isdigit():
-                labels.append(telegram_user_label_sync(int(item)))
-            else:
-                labels.append(item)
-        return ", ".join(labels) or "空"
+        return auth_user_ids_to_labels_from_cache(cache_path, value)
 
     def xboard_user_label_sync(uid: int) -> str:
         return render_user_label(uid, cached_user_name_by_id(cache_path, uid))
@@ -467,79 +453,19 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         return f"对象：{target}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"
 
     def authorization_manage_keyboard(super_admin: bool = False) -> InlineKeyboardMarkup:
-        rows = [[
-            InlineKeyboardButton("🔐 增加授权", callback_data="main_menu:auth:add"),
-            InlineKeyboardButton("🔓 删除授权", callback_data="main_menu:auth:delete"),
-        ]]
-        if super_admin:
-            rows.append([InlineKeyboardButton("🎭 权限变更", callback_data="main_menu:auth:roles")])
-        rows.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
+        return authorization_manage_keyboard_for_cfg(super_admin)
 
     def authorization_delete_keyboard(context: ContextTypes.DEFAULT_TYPE, super_admin: bool = False) -> InlineKeyboardMarkup:
-        selected = context.user_data.get("auth_delete_selected") or set()
-        if not isinstance(selected, set):
-            selected = set(selected or [])
-        rows = []
-        deletable: list[tuple[int, str]] = [(uid, "🎩") for uid in sorted(cfg.telegram.authorized_user_ids)]
-        if super_admin:
-            deletable = [(uid, "👑") for uid in sorted(cfg.telegram.manager_user_ids)] + deletable
-        for uid, emoji in deletable:
-            mark = "✅ " if uid in selected else ""
-            label = f"{mark}{emoji} {telegram_user_label_sync(uid)} ({uid})"
-            rows.append([InlineKeyboardButton(label[:64], callback_data=f"main_menu:auth:del_toggle:{uid}")])
-        if rows:
-            rows.append([InlineKeyboardButton("✅ 完成选择", callback_data="main_menu:auth:del_done")])
-        else:
-            rows.append([InlineKeyboardButton("暂无可删除授权用户", callback_data="main_menu:noop")])
-        rows.append([InlineKeyboardButton("⬅️ 返回授权管理", callback_data="main_menu:auth"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
+        return authorization_delete_keyboard_for_cfg(cfg, cache_path, context, super_admin)
 
     def authorization_delete_confirm_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ 确认删除", callback_data="main_menu:auth:del_confirm")],
-            [InlineKeyboardButton("⬅️ 返回选择", callback_data="main_menu:auth:delete"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
+        return authorization_delete_confirm_keyboard_for_cfg()
 
     def authorization_role_change_text(context: ContextTypes.DEFAULT_TYPE) -> str:
-        role_changes = context.user_data.get("auth_role_changes") or {}
-        if not isinstance(role_changes, dict):
-            role_changes = {}
-        lines = [
-            "🎭 <b>权限变更</b>",
-            "────────────",
-            "点击用户即可在 🎩 普通用户 / 👑 普通管理员之间切换。",
-            "未确认的变更会在下方显示；点击保存后才生效。"
-        ]
-        pending_lines = []
-        for uid, role in sorted(role_changes.items(), key=lambda item: int(item[0])):
-            target_role = str(role)
-            current_role = "manager" if int(uid) in cfg.telegram.manager_user_ids else "user"
-            if target_role == current_role:
-                continue
-            emoji = "👑" if target_role == "manager" else "🎩"
-            role_label = "普通管理员" if target_role == "manager" else "普通用户"
-            pending_lines.append(f"{emoji} {html.escape(telegram_user_label_sync(int(uid)))} (<code>{int(uid)}</code>) → {role_label}")
-        if pending_lines:
-            lines.extend(["", "待保存变更：", *pending_lines])
-        return "\n".join(lines)
+        return authorization_role_change_text_for_cfg(cfg, cache_path, context)
 
     def authorization_role_change_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-        role_changes = context.user_data.get("auth_role_changes") or {}
-        if not isinstance(role_changes, dict):
-            role_changes = {}
-        rows: list[list[InlineKeyboardButton]] = []
-        candidates = [(uid, "manager") for uid in sorted(cfg.telegram.manager_user_ids)] + [(uid, "user") for uid in sorted(cfg.telegram.authorized_user_ids)]
-        for uid, current_role in candidates:
-            target_role = str(role_changes.get(uid, current_role))
-            emoji = "👑" if target_role == "manager" else "🎩"
-            rows.append([InlineKeyboardButton(f"{emoji} {telegram_user_label_sync(uid)} ({uid})"[:64], callback_data=f"main_menu:auth:role_toggle:{uid}")])
-        if candidates:
-            rows.append([InlineKeyboardButton("💾 保存变更", callback_data="main_menu:auth:role_save")])
-        else:
-            rows.append([InlineKeyboardButton("暂无可变更权限的用户", callback_data="main_menu:noop")])
-        rows.append([InlineKeyboardButton("⬅️ 返回授权管理", callback_data="main_menu:auth"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
+        return authorization_role_change_keyboard_for_cfg(cfg, cache_path, context)
 
     def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         rows = [

@@ -61,8 +61,6 @@ from .menus import (
     health_check_keyboard,
     ip_ignore_menu_keyboard,
     ip_monitor_keyboard,
-    ip_monitor_period_keyboard,
-    ip_monitor_period_result_keyboard,
     main_menu_keyboard,
     nickname_config_keyboard,
     parameter_config_keyboard,
@@ -397,21 +395,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         rows.append([back_button, InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
         return InlineKeyboardMarkup(rows)
 
-    def cache_retention_keyboard(selected_days: int | None = None) -> InlineKeyboardMarkup:
-        selected_days = cache_retention_days_sync(cache_path) if selected_days is None else selected_days
-        rows = []
-        for option_key, (days, label) in CACHE_RETENTION_OPTIONS.items():
-            mark = "✅ " if int(days) == int(selected_days) else ""
-            rows.append([InlineKeyboardButton(f"{mark}{label}", callback_data=f"main_menu:parameter_config:cache_retention_select:{option_key}")])
-        rows.append(back_close_row("main_menu:parameter_config", "⬅️ 返回参数配置"))
-        return InlineKeyboardMarkup(rows)
-
-    def cache_retention_confirm_keyboard(option_key: str) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ 确认并清理", callback_data=f"main_menu:parameter_config:cache_retention_confirm:{option_key}")],
-            [InlineKeyboardButton("⬅️ 返回选择", callback_data="main_menu:parameter_config:cache_retention"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
     def cache_retention_text_sync() -> str:
         days = cache_retention_days_sync(cache_path)
         return "\n".join([
@@ -442,142 +425,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             "",
             "确认后立即生效。",
         ])
-
-    def notification_push_keyboard(chat_id: str, is_admin: bool = False) -> InlineKeyboardMarkup:
-        status = notification_status_sync(cache_path, chat_id, DEFAULT_ALLOWLIST_NOTIFICATION_KINDS)
-        def label(kind: str) -> str:
-            if kind == "ip_alert":
-                mode = notification_ip_alert_mode_sync(cache_path, chat_id)
-                if mode == "advanced":
-                    return "🔔 异地登录+"
-                if mode == "basic":
-                    return "🔔 异地登录"
-                return "🔕 异地登录"
-            return f"{'🔔' if status.get(kind) else '🔕'} {NOTIFICATION_KINDS[kind]}"
-        rows = [
-            [InlineKeyboardButton(label("collector"), callback_data="main_menu:notifications:collector")],
-            [InlineKeyboardButton(label("daily"), callback_data="main_menu:notifications:daily")],
-            [InlineKeyboardButton(label("weekly"), callback_data="main_menu:notifications:weekly")],
-            [InlineKeyboardButton(label("monthly"), callback_data="main_menu:notifications:monthly")],
-            [InlineKeyboardButton(label("traffic_alert"), callback_data="main_menu:notifications:traffic_alert")],
-            [InlineKeyboardButton(label("ip_alert"), callback_data="main_menu:notifications:ip_alert")],
-        ]
-        if is_admin:
-            rows.append([InlineKeyboardButton(label("version_update"), callback_data="main_menu:notifications:version_update")])
-        rows.append(back_close_row())
-        return InlineKeyboardMarkup(rows)
-
-
-    def alert_menu_keyboard(alert_type: str) -> InlineKeyboardMarkup:
-        back_target = "main_menu:traffic_management" if alert_type == "traffic" else "main_menu:ip_monitor"
-        back_text = "⬅️ 返回流量统计" if alert_type == "traffic" else "⬅️ 返回 IP 监控"
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎚️ 默认规则", callback_data=f"alert_global:{alert_type}")],
-            [InlineKeyboardButton("🌟 独立规则", callback_data=f"alert_users:{alert_type}:0")],
-            back_close_row(back_target, back_text),
-        ])
-
-    def alert_user_list_keyboard(alert_type: str, users: list[dict[str, Any]], page: int = 0) -> InlineKeyboardMarkup:
-        per_page = 10
-        page = max(0, page)
-        start = page * per_page
-        page_users = users[start:start + per_page]
-        rows = []
-        for user in page_users:
-            xboard_user_id = int(user["user_id"])
-            name = str(user.get("name") or f"用户{xboard_user_id}")
-            setting_label = str(user.get("setting_label") or "默认")
-            label_text = f"{name} (user_id: {xboard_user_id}) ({setting_label})"
-            rows.append([InlineKeyboardButton(label_text, callback_data=f"alert_user:{alert_type}:{xboard_user_id}")])
-        nav = []
-        if page > 0:
-            nav.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"alert_users:{alert_type}:{page - 1}"))
-        if start + per_page < len(users):
-            nav.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"alert_users:{alert_type}:{page + 1}"))
-        if nav:
-            rows.append(nav)
-        rows.append([InlineKeyboardButton("⬅️ 返回", callback_data=f"alert_menu:{alert_type}"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def alert_period_keyboard(prefix: str, alert_type: str) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("近 1 小时", callback_data=f"{prefix}:{alert_type}:period:1h"), InlineKeyboardButton("近 24 小时", callback_data=f"{prefix}:{alert_type}:period:24h"), InlineKeyboardButton("近 7 天", callback_data=f"{prefix}:{alert_type}:period:7d")],
-            [InlineKeyboardButton("今天", callback_data=f"{prefix}:{alert_type}:period:today"), InlineKeyboardButton("本周", callback_data=f"{prefix}:{alert_type}:period:week")],
-        ])
-
-    def alert_user_current_period_and_threshold(alert_type: str, xboard_user_id: int) -> tuple[str, str]:
-        setting = alert_user_setting_sync(cache_path, xboard_user_id)
-        if alert_type == "traffic":
-            period = setting.get("traffic_period") or alert_global_period_sync(cache_path, "traffic")
-            threshold = int(setting.get("traffic_threshold_bytes") or alert_global_threshold_sync(cache_path, "traffic"))
-            return alert_period_label(period), format_bytes(threshold)
-        period = setting.get("ip_period") or alert_global_period_sync(cache_path, "ip")
-        threshold = int(setting.get("ip_city_threshold") or alert_global_threshold_sync(cache_path, "ip"))
-        return alert_period_label(period), f"{threshold} 个城市"
-
-    def alert_user_setting_keyboard(alert_type: str, xboard_user_id: int) -> InlineKeyboardMarkup:
-        setting = alert_user_setting_sync(cache_path, xboard_user_id)
-        whitelist_key = "traffic_whitelist" if alert_type == "traffic" else "ip_whitelist"
-        is_whitelisted = bool(int(setting.get(whitelist_key) or 0))
-        whitelist_text = "🌑 取消白名单" if is_whitelisted else "🌕 设为白名单"
-        period_text, threshold_text = alert_user_current_period_and_threshold(alert_type, xboard_user_id)
-        if is_whitelisted:
-            period_text = "♾️"
-            threshold_text = "♾️"
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton(whitelist_text, callback_data=f"alert_set:{alert_type}:whitelist:{xboard_user_id}")],
-            [InlineKeyboardButton(period_text, callback_data=f"alert_period_page:{alert_type}:{xboard_user_id}"), InlineKeyboardButton(threshold_text, callback_data=f"alert_set:{alert_type}:custom:{xboard_user_id}")],
-            [InlineKeyboardButton("♻️ 恢复默认", callback_data=f"alert_set:{alert_type}:reset:{xboard_user_id}")],
-            [InlineKeyboardButton("⬅️ 用户列表", callback_data=f"alert_users:{alert_type}:0"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
-    def alert_user_period_select_keyboard(alert_type: str, xboard_user_id: int) -> InlineKeyboardMarkup:
-        rows = alert_period_keyboard("alert_set", alert_type).inline_keyboard
-        return InlineKeyboardMarkup([
-            *[[InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}:{xboard_user_id}") for button in row] for row in rows],
-            [InlineKeyboardButton("⬅️ 返回", callback_data=f"alert_user:{alert_type}:{xboard_user_id}"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
-    def alert_global_current_period_and_threshold(alert_type: str) -> tuple[str, str]:
-        period = alert_global_period_sync(cache_path, alert_type)
-        threshold = alert_global_threshold_sync(cache_path, alert_type)
-        if alert_type == "traffic":
-            return alert_period_label(period), format_bytes(threshold)
-        return alert_period_label(period), f"{threshold} 个城市"
-
-    def alert_global_keyboard(alert_type: str) -> InlineKeyboardMarkup:
-        period_text, threshold_text = alert_global_current_period_and_threshold(alert_type)
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton(period_text, callback_data=f"alert_global_period_page:{alert_type}"), InlineKeyboardButton(threshold_text, callback_data=f"alert_global:{alert_type}:custom")],
-            [InlineKeyboardButton("⬅️ 返回", callback_data=f"alert_menu:{alert_type}"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
-    def alert_global_period_select_keyboard(alert_type: str) -> InlineKeyboardMarkup:
-        rows = alert_period_keyboard("alert_global", alert_type).inline_keyboard
-        return InlineKeyboardMarkup([
-            *rows,
-            [InlineKeyboardButton("⬅️ 返回", callback_data=f"alert_global:{alert_type}"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-    def reset_user_ip_select_keyboard(users: list[tuple[int, str]], selected: set[int], page: int = 0) -> InlineKeyboardMarkup:
-        rows: list[list[InlineKeyboardButton]] = []
-        page_size = 10
-        total_pages = max(1, (len(users) + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        start = page * page_size
-        for user_id_value, label in users[start:start + page_size]:
-            prefix = "✅ " if user_id_value in selected else ""
-            rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"main_menu:debug:reset_user_ip_toggle:{page}:{user_id_value}")])
-        if len(users) > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"main_menu:debug:reset_user_ip_page:{page - 1}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-            if page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"main_menu:debug:reset_user_ip_page:{page + 1}"))
-            rows.append(nav_row)
-        rows.append([InlineKeyboardButton(f"✅ 完成选择 ({len(selected)})", callback_data="main_menu:debug:reset_user_ip_done")])
-        rows.append(back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"))
-        return InlineKeyboardMarkup(rows)
 
     def start_menu_text(update: Update, custom_name: str | None = None) -> str:
         user = update.effective_user
@@ -976,7 +823,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         return InlineKeyboardMarkup(rows)
 
     def alert_user_setting_keyboard_for_source(alert_type: str, xboard_user_id: int, source: str | None = None) -> InlineKeyboardMarkup:
-        keyboard = alert_user_setting_keyboard(alert_type, xboard_user_id)
+        keyboard = alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id)
         if source != "alert" or alert_type != "ip":
             return keyboard
         rows = [list(row) for row in keyboard.inline_keyboard]
@@ -1883,7 +1730,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-                notification_push_keyboard(chat_id, is_admin_user_id(query.from_user.id, cfg)),
+                notification_push_keyboard(bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)),
                 parse_mode="HTML",
             )
             return
@@ -1904,7 +1751,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-                notification_push_keyboard(chat_id, is_admin_user_id(query.from_user.id, cfg)),
+                notification_push_keyboard(bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)),
                 parse_mode="HTML",
             )
             return
@@ -2055,7 +1902,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
         if data == "main_menu:parameter_config:cache_retention":
             await answer_callback_silently(query)
-            await show_callback_page(query, cache_retention_text_sync(), cache_retention_keyboard(), parse_mode="HTML")
+            await show_callback_page(query, cache_retention_text_sync(), cache_retention_keyboard(bot_ctx.cache_path), parse_mode="HTML")
             return
 
         retention_select_match = re.fullmatch(r"main_menu:parameter_config:cache_retention_select:(1m|1q|1y|all)", data)
@@ -2092,7 +1939,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 f"• 流量分钟样本：<b>{int(stats.get('traffic_delta_samples') or 0)}</b> 条\n"
                 f"• 采样中断记录：<b>{int(stats.get('traffic_sample_gaps') or 0)}</b> 条\n"
                 f"• 自定义范围：<b>{int(stats.get('traffic_ranges') or 0)}</b> 条",
-                cache_retention_keyboard(days),
+                cache_retention_keyboard(bot_ctx.cache_path, days),
                 parse_mode="HTML",
             )
             return
@@ -2720,7 +2567,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             text = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
             await answer_callback_silently(query)
-            await show_callback_page(query, text, alert_global_keyboard(alert_type), parse_mode="HTML")
+            await show_callback_page(query, text, alert_global_keyboard(bot_ctx.cache_path, alert_type), parse_mode="HTML")
             return
 
         global_period_match = re.fullmatch(r"alert_global:(traffic|ip):period:(1h|24h|7d|today|week)", data)
@@ -2733,7 +2580,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整默认周期", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
             text = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
             await query.answer("默认周期已保存")
-            await show_callback_page(query, text, alert_global_keyboard(alert_type), parse_mode="HTML")
+            await show_callback_page(query, text, alert_global_keyboard(bot_ctx.cache_path, alert_type), parse_mode="HTML")
             return
 
         user_period_match = re.fullmatch(r"alert_set:(traffic|ip):period:(1h|24h|7d|today|week):(\d+)", data)
@@ -2752,7 +2599,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整独立周期", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("周期已保存")
-            await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
+            await show_callback_page(query, text, alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id), parse_mode="HTML")
             return
 
         custom_match = re.fullmatch(r"alert_set:(traffic|ip):custom:(\d+)", data)
@@ -2786,7 +2633,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("规则已保存")
-            await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
+            await show_callback_page(query, text, alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id), parse_mode="HTML")
             return
 
         white_match = re.fullmatch(r"alert_set:(traffic|ip):whitelist:(\d+)", data)
@@ -2806,7 +2653,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "切换白名单", alert_setting_before_after_detail(alert_type, "白名单", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("白名单已更新")
-            await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
+            await show_callback_page(query, text, alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id), parse_mode="HTML")
             return
 
         reset_match = re.fullmatch(r"alert_set:(traffic|ip):reset:(\d+)", data)
@@ -2821,7 +2668,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "恢复默认规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("已恢复默认")
-            await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
+            await show_callback_page(query, text, alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id), parse_mode="HTML")
             return
 
         await query.answer("请求无效，请重新进入。", show_alert=True)
@@ -3060,7 +2907,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             after = f"{alert_period_label(before_period)} / {format_bytes(after_threshold) if alert_type == 'traffic' else str(after_threshold) + ' 个城市'}"
             await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, alert_category(alert_type), "调整默认规则", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
             result = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
-            await edit_global_alert_prompt(result, alert_global_keyboard(alert_type), "HTML")
+            await edit_global_alert_prompt(result, alert_global_keyboard(bot_ctx.cache_path, alert_type), "HTML")
             await context_bot_delete_message(input_chat_id, input_message_id)
             return
 
@@ -3143,7 +2990,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             after = alert_setting_label(after_setting, alert_type, cache_path)
             await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             result = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
-            await edit_alert_prompt(result, alert_user_setting_keyboard(alert_type, xboard_user_id), "HTML")
+            await edit_alert_prompt(result, alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id), "HTML")
             await context_bot_delete_message(input_chat_id, input_message_id)
             return
 

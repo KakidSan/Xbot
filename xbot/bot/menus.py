@@ -75,34 +75,6 @@ def ip_ignore_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def ip_monitor_period_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("近 1 小时", callback_data="active_users:1h"), InlineKeyboardButton("近 24 小时", callback_data="active_users:24h")],
-        [InlineKeyboardButton("近 7 天", callback_data="active_users:7d"), InlineKeyboardButton("近 30 天", callback_data="active_users:30d")],
-        [InlineKeyboardButton("自选区间", callback_data="ip_custom:start")],
-        back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"),
-    ])
-
-
-def ip_monitor_period_result_keyboard(selected_period: str = "1h") -> InlineKeyboardMarkup:
-    period_labels = {
-        "1h": "近 1 小时",
-        "24h": "近 24 小时",
-        "7d": "近 7 天",
-        "30d": "近 30 天",
-    }
-    switch_row = [
-        InlineKeyboardButton(label, callback_data=f"active_users:{key}")
-        for key, label in period_labels.items()
-        if key != selected_period
-    ]
-    return InlineKeyboardMarkup([
-        switch_row,
-        [InlineKeyboardButton("自选区间", callback_data="ip_custom:start")],
-        back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"),
-    ])
-
-
 def parameter_config_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 自定题图", callback_data="main_menu:parameter_config:cover")],

@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from ..common import *
+from ..common import (
+    Any,
+    MySQLError,
+    Path,
+    compact_connection_error_lines,
+    datetime,
+    html_code,
+    pymysql,
+    re,
+)
 from .redis import test_redis_connection_sync, tcp_check
 
 def mysql_config_missing(cfg: MySQLConfig) -> bool:

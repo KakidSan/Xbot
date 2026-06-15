@@ -1,9 +1,28 @@
 from __future__ import annotations
 
-from .common import *
-from .db.cache import *
-from .bot.keyboards import *
-from .bot.formatters import *
+from .common import (
+    APP_DIR,
+    Any,
+    Application,
+    FALLBACK_VERSION,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Path,
+    TAGS_API_URL,
+    UPDATE_SCRIPT,
+    UPDATE_STATUS_FILE,
+    VERSION_FILE,
+    VERSION_TAG_RE,
+    asyncio,
+    beijing_now,
+    html,
+    json,
+    log,
+    re,
+    subprocess,
+    urllib,
+)
+from .db.cache import alert_state_set_sync, default_allowlist_notification_chats_sync, get_collector_state_sync
 
 def run_command_sync(args: list[str], cwd: Path = APP_DIR, timeout: int = 20) -> tuple[int, str, str]:
     try:

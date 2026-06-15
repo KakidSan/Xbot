@@ -23,7 +23,6 @@ from ..common import (
     alert_period_label,
     argparse,
     asyncio,
-    calendar,
     datetime,
     field,
     filters,
@@ -104,7 +103,6 @@ from ..db.cache import (
     clear_message_tracking_for_chat_sync,
     clear_user_ip_records_multi_sync,
     count_user_ips_from_cache_sync,
-    earliest_traffic_sample_at_sync,
     format_timestamp,
     geo_area_key,
     ignored_list_items_sync,
@@ -120,8 +118,6 @@ from ..db.cache import (
     list_all_cached_user_buttons_sync,
     list_user_ips_from_cache_sync,
     make_range_kind,
-    notification_ip_alert_mode_sync,
-    notification_status_sync,
     notification_toggle_sync,
     operation_log_add_sync,
     operation_log_counts_sync,
@@ -174,7 +170,31 @@ from .formatters import (
     traffic_dashboard_text_from_kind_sync,
     user_display,
 )
-from .keyboards import ip_alert_keyboard, traffic_dashboard_keyboard_static
+from .keyboards import (
+    alert_global_keyboard,
+    alert_menu_keyboard,
+    alert_user_list_keyboard,
+    alert_user_setting_keyboard,
+    active_users_keyboard,
+    cache_retention_keyboard,
+    notification_push_keyboard,
+    reset_user_ip_select_keyboard,
+    alert_user_setting_keyboard_for_source,
+    detail_keyboard,
+    ip_alert_keyboard,
+    ip_detail_list_keyboard,
+    traffic_custom_available_bounds,
+    traffic_custom_day_keyboard,
+    traffic_custom_hour_keyboard,
+    traffic_custom_minute_keyboard,
+    traffic_custom_month_keyboard,
+    traffic_custom_single_year,
+    traffic_custom_year_keyboard,
+    traffic_dashboard_keyboard,
+    traffic_period_keyboard,
+    user_ip_detail_keyboard,
+    user_ip_query_page_keyboard,
+)
 
 def user_id(update: Update) -> int | None:
     return update.effective_user.id if update.effective_user else None
@@ -735,164 +755,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 pass
             await reply_long_text(update.effective_message, text, parse_mode="HTML")
 
-    def active_users_keyboard(
-        selected_period: str | None = None,
-        user_buttons: list[tuple[int, str]] | None = None,
-        page: int = 0,
-    ) -> InlineKeyboardMarkup:
-        rows = [[
-            InlineKeyboardButton("近 1 小时", callback_data="active_users:1h"),
-            InlineKeyboardButton("近 24 小时", callback_data="active_users:24h"),
-            InlineKeyboardButton("近 7 天", callback_data="active_users:7d"),
-        ]]
-        if selected_period:
-            rows.append([InlineKeyboardButton("🔎 按用户 ID 查询", callback_data=f"ip_user_query:{selected_period}"), InlineKeyboardButton("🔍 用户列表", callback_data=f"active_users_query:{selected_period}:0")])
-
-        if selected_period and user_buttons is not None:
-            page_size = 5
-            total_pages = max(1, (len(user_buttons) + page_size - 1) // page_size)
-            page = min(max(page, 0), total_pages - 1)
-            start = page * page_size
-            for user_id, name in user_buttons[start:start + page_size]:
-                rows.append([
-                    InlineKeyboardButton(
-                        name,
-                        callback_data=f"active_user_detail:{selected_period}:{user_id}",
-                    )
-                ])
-            if len(user_buttons) > page_size:
-                nav_row = []
-                if page > 0:
-                    nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"active_users_query:{selected_period}:{page - 1}"))
-                nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-                if page < total_pages - 1:
-                    nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"active_users_query:{selected_period}:{page + 1}"))
-                rows.append(nav_row)
-            rows.append([InlineKeyboardButton("❎ 取消", callback_data=f"active_users_cancel:{selected_period}")])
-        if not selected_period:
-            rows.append(back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"))
-        return InlineKeyboardMarkup(rows)
-
-    def ip_detail_list_keyboard(kind: str, user_buttons: list[tuple[int, str]], page: int = 0) -> InlineKeyboardMarkup:
-        rows: list[list[InlineKeyboardButton]] = []
-        page_size = 5
-        total_pages = max(1, (len(user_buttons) + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        start = page * page_size
-        for user_id, name in user_buttons[start:start + page_size]:
-            rows.append([InlineKeyboardButton(name, callback_data=f"ip_active_user_detail:{kind}:{user_id}")])
-        if len(user_buttons) > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"ip_detail_list:{kind}:{page - 1}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-            if page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"ip_detail_list:{kind}:{page + 1}"))
-            rows.append(nav_row)
-        rows.append([InlineKeyboardButton("💫 切换查询周期", callback_data="main_menu:ip_monitor:period"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def user_ip_detail_keyboard(kind: str, xboard_user_id: int, total_ips: int, page: int = 0, source: str | None = None) -> InlineKeyboardMarkup:
-        rows: list[list[InlineKeyboardButton]] = []
-        page_size = 10
-        total_pages = max(1, (total_ips + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        if total_ips > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                suffix = f":{source}" if source else ""
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"ip_active_user_detail:{kind}:{xboard_user_id}:{page - 1}{suffix}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-            if page < total_pages - 1:
-                suffix = f":{source}" if source else ""
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"ip_active_user_detail:{kind}:{xboard_user_id}:{page + 1}{suffix}"))
-            rows.append(nav_row)
-        suffix = f":{source}" if source else ""
-        rows.append([
-            InlineKeyboardButton("忽略地区", callback_data=f"ip_ignore_page:area:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-            InlineKeyboardButton("忽略 ASN", callback_data=f"ip_ignore_page:asn:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-            InlineKeyboardButton("忽略 IP", callback_data=f"ip_ignore_page:cidr:{kind}:{xboard_user_id}:{page}:0{suffix}"),
-        ])
-        back_button = InlineKeyboardButton("⬅️ 返回用户列表", callback_data=f"ip_detail_list:{kind}:0")
-        if source == "alert":
-            back_button = InlineKeyboardButton("⬅️ 返回告警", callback_data=f"ip_alert_notice:{xboard_user_id}")
-        rows.append([
-            back_button,
-            InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
-        ])
-        return InlineKeyboardMarkup(rows)
-
-    def alert_user_setting_keyboard_for_source(alert_type: str, xboard_user_id: int, source: str | None = None) -> InlineKeyboardMarkup:
-        keyboard = alert_user_setting_keyboard(bot_ctx.cache_path, alert_type, xboard_user_id)
-        if source != "alert" or alert_type != "ip":
-            return keyboard
-        rows = [list(row) for row in keyboard.inline_keyboard]
-        rows[-1] = [InlineKeyboardButton("⬅️ 返回告警", callback_data=f"ip_alert_notice:{xboard_user_id}"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")]
-        return InlineKeyboardMarkup(rows)
-
-    def detail_keyboard(period_key: str | None = None) -> InlineKeyboardMarkup:
-        back_target = period_key if period_key in {"1h", "24h", "7d", "30d"} else "menu"
-        return InlineKeyboardMarkup([[
-            InlineKeyboardButton("⬅️ 返回", callback_data=f"detail_back:{back_target}"),
-            InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
-        ]])
-
-    def user_ip_query_page_keyboard(period_key: str | None, xboard_user_id: int, total_ips: int, page: int = 0) -> InlineKeyboardMarkup:
-        rows: list[list[InlineKeyboardButton]] = []
-        page_size = 10
-        total_pages = max(1, (total_ips + page_size - 1) // page_size)
-        page = min(max(page, 0), total_pages - 1)
-        period_spec = period_key or "all"
-        if total_ips > page_size:
-            nav_row: list[InlineKeyboardButton] = []
-            if page > 0:
-                nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"user_ip_page:{xboard_user_id}:{page - 1}:{period_spec}"))
-            nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="noop"))
-            if page < total_pages - 1:
-                nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"user_ip_page:{xboard_user_id}:{page + 1}:{period_spec}"))
-            rows.append(nav_row)
-        back_target = period_key if period_key in {"1h", "24h", "7d", "30d"} else "menu"
-        rows.append([
-            InlineKeyboardButton("⬅️ 返回", callback_data=f"detail_back:{back_target}"),
-            InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
-        ])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_period_keyboard(dimension: str = "combined", source_kind: str | None = None) -> InlineKeyboardMarkup:
-        suffix = f":{dimension}" if dimension in {"users", "nodes"} else ""
-        prefix = "traffic_switch" if source_kind else "traffic_period"
-        rows = [
-            [
-                InlineKeyboardButton("近 1 小时", callback_data=f"{prefix}:preset_1h{suffix}"),
-                InlineKeyboardButton("近 24 小时", callback_data=f"{prefix}:preset_24h{suffix}"),
-            ],
-            [
-                InlineKeyboardButton("近 7 天", callback_data=f"{prefix}:preset_7d{suffix}"),
-                InlineKeyboardButton("近 30 天", callback_data=f"{prefix}:preset_30d{suffix}"),
-            ],
-            [
-                InlineKeyboardButton("今天", callback_data=f"{prefix}:today{suffix}"),
-                InlineKeyboardButton("昨天", callback_data=f"{prefix}:yesterday{suffix}"),
-            ],
-            [
-                InlineKeyboardButton("本周", callback_data=f"{prefix}:this_week{suffix}"),
-                InlineKeyboardButton("本月", callback_data=f"{prefix}:this_month{suffix}"),
-            ],
-        ]
-        custom_callback = f"traffic_custom:start:{dimension}"
-        if source_kind:
-            rows.append([InlineKeyboardButton("自选周期", callback_data=custom_callback)])
-            rows.append([InlineKeyboardButton("⬅️ 返回结果", callback_data=f"traffic_back:{source_kind}")])
-        else:
-            rows.append([InlineKeyboardButton("自选周期", callback_data=custom_callback)])
-        rows.append([InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_dashboard_keyboard(kind: str, is_pinned: bool = False) -> InlineKeyboardMarkup:
-        return traffic_dashboard_keyboard_static(kind, is_pinned)
-
-
-
     def traffic_dashboard_text(kind: str) -> str:
         return traffic_dashboard_text_from_kind_sync(cache_path, kind)
 
@@ -959,18 +821,9 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         state = context.user_data.setdefault("traffic_custom", {})
         return state if isinstance(state, dict) else {}
 
-    def traffic_custom_available_bounds() -> tuple[int, int]:
-        first = earliest_traffic_sample_at_sync(cache_path)
-        now_ts = int(datetime.now().timestamp())
-        return (first or now_ts, now_ts)
-
-    def traffic_custom_single_year() -> bool:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        return datetime.fromtimestamp(first_ts).year == datetime.fromtimestamp(now_ts).year
-
     def traffic_custom_enter_initial_step(state: dict[str, Any]) -> None:
-        if state.get("mode") in {"custom", "ip_custom"} and traffic_custom_single_year():
-            _, now_ts = traffic_custom_available_bounds()
+        if state.get("mode") in {"custom", "ip_custom"} and traffic_custom_single_year(cache_path):
+            _, now_ts = traffic_custom_available_bounds(cache_path)
             state["year"] = datetime.fromtimestamp(now_ts).year
             state["step"] = "month"
         else:
@@ -978,7 +831,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state["step"] = "year"
 
     def traffic_custom_prompt_text(state: dict[str, Any]) -> str:
-        first_ts, _ = traffic_custom_available_bounds()
+        first_ts, _ = traffic_custom_available_bounds(cache_path)
         step = str(state.get("step") or "year")
         step_label = {"year": "年份", "month": "月份", "day": "日期", "hour": "小时", "minute": "分钟"}.get(step, "时间")
 
@@ -1021,109 +874,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             lines.append(f"已选结束：{selected_combo_text()}")
         return "\n".join(lines)
 
-    def traffic_custom_year_keyboard(mode: str | None = None, include_now: bool = False, dimension: str = "combined") -> InlineKeyboardMarkup:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        first_year = datetime.fromtimestamp(first_ts).year
-        now_year = datetime.fromtimestamp(now_ts).year
-        rows = []
-        row = []
-        for year in range(first_year, now_year + 1):
-            row.append(InlineKeyboardButton(str(year), callback_data=f"traffic_custom:year:{year}"))
-            if len(row) == 3:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        if include_now:
-            rows.append([InlineKeyboardButton("⏰ 至今", callback_data="traffic_custom:now")])
-        if mode == "ip_custom":
-            back_callback = "main_menu:ip_monitor:period"
-        elif mode == "floor":
-            back_callback = "main_menu:debug:reset_cache"
-        else:
-            back_callback = "traffic_menu"
-        rows.append([InlineKeyboardButton("⬅️ 返回", callback_data=back_callback), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_custom_month_keyboard(year: int, include_now: bool = False, mode: str | None = None, dimension: str = "combined") -> InlineKeyboardMarkup:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        first_dt = datetime.fromtimestamp(first_ts)
-        now_dt = datetime.fromtimestamp(now_ts)
-        start_month = first_dt.month if year == first_dt.year else 1
-        end_month = now_dt.month if year == now_dt.year else 12
-        rows = []
-        row = []
-        for month in range(start_month, end_month + 1):
-            row.append(InlineKeyboardButton(f"{month}月", callback_data=f"traffic_custom:month:{month}"))
-            if len(row) == 4:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        if include_now:
-            rows.append([InlineKeyboardButton("⏰ 至今", callback_data="traffic_custom:now")])
-        if traffic_custom_single_year():
-            back_callback = "main_menu:ip_monitor:period" if mode == "ip_custom" else "traffic_menu"
-            rows.append([InlineKeyboardButton("⬅️ 返回", callback_data=back_callback), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        else:
-            rows.append([InlineKeyboardButton("⬅️ 返回年份", callback_data="traffic_custom:back:year"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_custom_day_keyboard(year: int, month: int, mode: str | None = None, dimension: str = "combined") -> InlineKeyboardMarkup:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        first_dt = datetime.fromtimestamp(first_ts)
-        now_dt = datetime.fromtimestamp(now_ts)
-        _, days_in_month = calendar.monthrange(year, month)
-        start_day = first_dt.day if year == first_dt.year and month == first_dt.month else 1
-        end_day = now_dt.day if year == now_dt.year and month == now_dt.month else days_in_month
-        rows = []
-        row = []
-        for day in range(start_day, end_day + 1):
-            row.append(InlineKeyboardButton(str(day), callback_data=f"traffic_custom:day:{day}"))
-            if len(row) == 7:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        rows.append([InlineKeyboardButton("⬅️ 返回月份", callback_data="traffic_custom:back:month"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_custom_hour_keyboard(year: int, month: int, day: int, mode: str | None = None, dimension: str = "combined") -> InlineKeyboardMarkup:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        first_dt = datetime.fromtimestamp(first_ts)
-        now_dt = datetime.fromtimestamp(now_ts)
-        start_hour = first_dt.hour if (year, month, day) == (first_dt.year, first_dt.month, first_dt.day) else 0
-        end_hour = now_dt.hour if (year, month, day) == (now_dt.year, now_dt.month, now_dt.day) else 23
-        rows = []
-        row = []
-        for hour in range(start_hour, end_hour + 1):
-            row.append(InlineKeyboardButton(f"{hour:02d}", callback_data=f"traffic_custom:hour:{hour}"))
-            if len(row) == 6:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        rows.append([InlineKeyboardButton("⬅️ 返回日期", callback_data="traffic_custom:back:day"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def traffic_custom_minute_keyboard(year: int, month: int, day: int, hour: int, mode: str | None = None, dimension: str = "combined") -> InlineKeyboardMarkup:
-        first_ts, now_ts = traffic_custom_available_bounds()
-        first_dt = datetime.fromtimestamp(first_ts)
-        now_dt = datetime.fromtimestamp(now_ts)
-        start_minute = first_dt.minute if (year, month, day, hour) == (first_dt.year, first_dt.month, first_dt.day, first_dt.hour) else 0
-        end_minute = now_dt.minute if (year, month, day, hour) == (now_dt.year, now_dt.month, now_dt.day, now_dt.hour) else 59
-        rows = []
-        row = []
-        for minute in range(start_minute, end_minute + 1):
-            row.append(InlineKeyboardButton(f"{minute:02d}", callback_data=f"traffic_custom:minute:{minute}"))
-            if len(row) == 6:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        rows.append([InlineKeyboardButton("⬅️ 返回小时", callback_data="traffic_custom:back:hour"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
     def traffic_floor_confirm_keyboard(floor_ts: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ 确认调整起始点", callback_data=f"traffic_floor:confirm:{floor_ts}")],
@@ -1139,16 +889,16 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         mode = str(state.get("mode") or "")
         dimension = str(state.get("dimension") or "combined")
         if step == "month" and year:
-            include_now = state.get("phase") == "end" and state.get("mode") in {"custom", "ip_custom"} and traffic_custom_single_year()
-            return traffic_custom_month_keyboard(year, include_now=include_now, mode=mode, dimension=dimension)
+            include_now = state.get("phase") == "end" and state.get("mode") in {"custom", "ip_custom"} and traffic_custom_single_year(cache_path)
+            return traffic_custom_month_keyboard(cache_path, year, include_now=include_now, mode=mode, dimension=dimension)
         if step == "day" and year and month:
-            return traffic_custom_day_keyboard(year, month, mode=mode, dimension=dimension)
+            return traffic_custom_day_keyboard(cache_path, year, month, mode=mode, dimension=dimension)
         if step == "hour" and year and month and day:
-            return traffic_custom_hour_keyboard(year, month, day, mode=mode, dimension=dimension)
+            return traffic_custom_hour_keyboard(cache_path, year, month, day, mode=mode, dimension=dimension)
         if step == "minute" and year and month and day:
-            return traffic_custom_minute_keyboard(year, month, day, hour, mode=mode, dimension=dimension)
+            return traffic_custom_minute_keyboard(cache_path, year, month, day, hour, mode=mode, dimension=dimension)
         include_now = state.get("phase") == "end" and state.get("step") == "year" and state.get("mode") in {"custom", "ip_custom"}
-        return traffic_custom_year_keyboard(mode, include_now=include_now, dimension=dimension)
+        return traffic_custom_year_keyboard(cache_path, mode, include_now=include_now, dimension=dimension)
 
     def traffic_fixed_range(kind: str) -> tuple[int, int, str] | None:
         now = datetime.now()
@@ -1303,7 +1053,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             state.clear()
             state.update({"mode": "floor", "phase": "floor", "step": "year"})
             await answer_callback_silently(query)
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_year_keyboard(str(state.get("mode") or "")))
+            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_year_keyboard(cache_path, str(state.get("mode") or "")))
             return
 
         floor_confirm_match = re.fullmatch(r"traffic_floor:confirm:(\d+)", data)
@@ -2005,7 +1755,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await show_callback_page(
                 query,
                 traffic_custom_prompt_text(state),
-                traffic_custom_year_keyboard(str(state.get("mode") or "")),
+                traffic_custom_year_keyboard(cache_path, str(state.get("mode") or "")),
             )
             return
 
@@ -2526,7 +2276,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 mark_no_auto_delete_message(query.message)
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await answer_callback_silently(query)
-            await show_callback_page(query, text, alert_user_setting_keyboard_for_source(alert_type, xboard_user_id, source), parse_mode="HTML", auto_delete=(source != "alert"))
+            await show_callback_page(query, text, alert_user_setting_keyboard_for_source(bot_ctx.cache_path, alert_type, xboard_user_id, source), parse_mode="HTML", auto_delete=(source != "alert"))
             return
 
 

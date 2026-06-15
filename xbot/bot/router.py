@@ -26,7 +26,7 @@ from .handlers.legacy import (
     handle_traffic_daily_callback,
 )
 from .handlers.main_menu import handle_close_message_callback, handle_detail_back_callback
-from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
+from .handlers.version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 
 
 def register_handlers(

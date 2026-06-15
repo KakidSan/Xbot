@@ -1,3 +1,5 @@
 from __future__ import annotations
 
-# TODO: Move focused handlers here from handlers.legacy during the next split phase.
+from .auth import auth_callback
+
+__all__ = ["auth_callback"]

@@ -18,14 +18,12 @@ from .handlers.commands import (
     handle_user_ip_query_command,
 )
 from .handlers.legacy import (
-    handle_active_users_callback,
     handle_alert_callback,
     handle_fallback_message,
     handle_ip_detail_callback,
-    handle_main_menu_callback,
-    handle_traffic_daily_callback,
 )
-from .handlers.main_menu import handle_close_message_callback, handle_detail_back_callback
+from .handlers.main_menu import handle_close_message_callback, handle_detail_back_callback, handle_main_menu_callback
+from .handlers.traffic import handle_active_users_callback, handle_traffic_daily_callback
 from .handlers.version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 
 

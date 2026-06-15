@@ -42,6 +42,7 @@ from ..common import (
 )
 from ..config import AppConfig, build_config_from_env
 from .context import BotContext
+from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 from ..db.cache import (
     active_user_button_items_from_cache_sync,
     actor_name_from_user,
@@ -121,17 +122,7 @@ from ..collector import (
     traffic_report_push_loop,
     traffic_sampler_loop,
 )
-from ..updater import (
-    read_app_version,
-    send_update_result_notice,
-    start_background_update_sync,
-    update_confirm_keyboard,
-    update_started_text,
-    version_check_sync,
-    version_keyboard,
-    version_text,
-    version_update_check_loop,
-)
+from ..updater import send_update_result_notice, version_update_check_loop
 from .formatters import (
     alert_global_setting_text_sync,
     alert_summary_sync,
@@ -1259,22 +1250,15 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         await track_auto_delete_message(sent)
 
     async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message:
-            return
-        if not is_allowed(update, cfg):
-            if is_bot_self_update(update, cfg):
-                return
-            await reply_connection_status(update, cfg)
-            return
-        is_admin = is_admin_user_id(user_id(update), cfg)
-        if is_admin:
-            status_message = await reply_cover_card(update, context, "正在检查版本更新，请稍候...")
-            check = await asyncio.to_thread(version_check_sync)
-        else:
-            status_message = await reply_cover_card(update, context, "正在读取当前版本，请稍候...")
-            check = {"current": read_app_version()}
-        await edit_or_replace_status_any(status_message, version_text(check, admin_view=is_admin), update, parse_mode="HTML", reply_markup=version_keyboard(check, admin_view=is_admin))
-        await delete_trigger_command_message(update)
+        await handle_version_command(
+            update,
+            context,
+            bot_ctx,
+            reply_cover_card,
+            edit_or_replace_status_any,
+            delete_trigger_command_message,
+            reply_connection_status,
+        )
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -2059,52 +2043,13 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
 
 
     async def version_update_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        query = update.callback_query
-        if not query or not query.message:
-            return
-        if not is_allowed(update, cfg):
-            await query.answer("未授权，无法使用该功能", show_alert=True)
-            return
-        if not is_admin_user_id(query.from_user.id, cfg):
-            await query.answer("只有管理员可以执行版本更新", show_alert=True)
-            return
-        data = query.data or ""
-        if data == "version_update:cancel":
-            await query.answer("已取消更新")
-            check = await asyncio.to_thread(version_check_sync)
-            await show_callback_page(query, version_text(check, admin_view=True), version_keyboard(check, admin_view=True), parse_mode="HTML")
-            return
-        m = re.fullmatch(r"version_update:start:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
-        if m:
-            target = m.group(1)
-            await answer_callback_silently(query)
-            await show_callback_page(query, update_started_text(target), update_confirm_keyboard(target), parse_mode="HTML")
-            return
-        m = re.fullmatch(r"version_update:confirm:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
-        if m:
-            target = m.group(1)
-            await query.answer("后台更新已启动")
-            ok, message = await asyncio.to_thread(start_background_update_sync, target, str(query.message.chat_id))
-            if ok:
-                await show_callback_page(
-                    query,
-                    "⬆️ <b>后台更新已启动</b>\n────────────\n"
-                    f"目标版本：<code>{html.escape(target)}</code>\n\n"
-                    "更新过程会在后台执行，Bot 可能会短暂离线。\n"
-                    "更新成功或失败后，我会主动推送结果通知。",
-                    InlineKeyboardMarkup([[InlineKeyboardButton("❌ 关闭", callback_data="close_message")]]),
-                    parse_mode="HTML",
-                )
-            else:
-                await show_callback_page(
-                    query,
-                    "❌ <b>无法启动后台更新</b>\n────────────\n" + html.escape(message),
-                    version_keyboard(await asyncio.to_thread(version_check_sync), admin_view=True),
-                    parse_mode="HTML",
-                )
-            return
-        await query.answer("请求无效，请重新进入。", show_alert=True)
-
+        await handle_version_update_callback(
+            update,
+            context,
+            bot_ctx,
+            show_callback_page,
+            answer_callback_silently,
+        )
     async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not query or not query.message:

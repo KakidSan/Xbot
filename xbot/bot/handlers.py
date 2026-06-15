@@ -109,7 +109,7 @@ from ..db.cache import (
     upsert_all_cache_users,
     user_ip_ignore_items_sync,
 )
-from ..geo import asn_key_for_geo_row, ignored_rules_text_sync, ipv4_24_cidr
+from ..geo import ignored_rules_text_sync
 from ..alerts import check_ip_alerts
 from ..collector import (
     cache_collector_loop,
@@ -133,21 +133,14 @@ from ..updater import (
 )
 from .formatters import (
     alert_global_setting_text_sync,
-    alert_period_label,
-    alert_setting_label,
     alert_summary_sync,
     alert_user_setting_text_sync,
-    asn_text,
     bot_health_overview_text_sync,
     bot_status_text_sync,
     cached_user_name_by_id,
     format_bytes,
     format_ip_alert,
-    format_timestamp,
-    geo_area_key,
-    ip_range_kind,
     notification_ip_alert_mode_label,
-    parse_ip_kind,
     render_user_label,
     traffic_dashboard_text_from_kind_sync,
     user_display,
@@ -171,12 +164,6 @@ def is_bot_self_update(update: Update, cfg: AppConfig) -> bool:
 def is_allowed(update: Update, cfg: AppConfig) -> bool:
     uid = user_id(update)
     return uid is not None and uid in cfg.telegram.allowed_user_ids
-
-def is_super_admin_user_id(uid: int | None, cfg: AppConfig) -> bool:
-    return uid is not None and uid in cfg.telegram.super_admin_user_ids
-
-def is_admin_user_id(uid: int | None, cfg: AppConfig) -> bool:
-    return uid is not None and uid in cfg.telegram.admin_user_ids
 
 async def reply_connection_status(update: Update, cfg: AppConfig) -> None:
     if not update.effective_message:
@@ -3810,38 +3797,5 @@ def main() -> None:
     parse_args()
     asyncio.run(serve())
 
-def beijing_now() -> datetime:
-    return datetime.now(BEIJING_TZ)
-
-def beijing_midnight(dt: datetime) -> datetime:
-    return dt.astimezone(BEIJING_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-
-def ignore_items_from_ip_rows(rows: list[sqlite3.Row], dimension: str) -> list[dict[str, Any]]:
-    buckets: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if dimension == "area":
-            value = geo_area_key(row)
-            if not value:
-                continue
-            label = " / ".join(value.split("|"))
-        elif dimension == "asn":
-            value = asn_key_for_geo_row(row)
-            if not value:
-                continue
-            label = asn_text(row)
-        elif dimension == "cidr":
-            value = ipv4_24_cidr(str(row["ip"] or ""))
-            if not value:
-                continue
-            label = value
-        else:
-            continue
-        bucket = buckets.setdefault(value, {"value": value, "label": label, "ips": set(), "last_seen_at": 0})
-        bucket["ips"].add(str(row["ip"]))
-        bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
-    return [
-        {"value": value, "label": str(bucket["label"]), "sub": f"{len(bucket['ips'])} IP", "last_seen_at": int(bucket["last_seen_at"])}
-        for value, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
-    ]
 # Export this module's own public symbols for downstream star imports.
 __all__ = [name for name in globals() if not name.startswith("_")]

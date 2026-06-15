@@ -194,56 +194,11 @@ def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any
             )
         apply_ignored_rules_conn(conn, now_ts)
 
-def ipv4_24_cidr(value: str) -> str | None:
-    try:
-        ip_obj = ipaddress.ip_address(str(value).strip())
-    except ValueError:
-        return None
-    if ip_obj.version != 4:
-        return None
-    return str(ipaddress.ip_network(f"{ip_obj}/24", strict=False))
-
-def raw_geo_data(row: sqlite3.Row) -> dict[str, Any]:
-    try:
-        raw = row["raw"]
-    except (KeyError, IndexError):
-        raw = None
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(str(raw))
-    except Exception:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
 def row_value(row: sqlite3.Row, name: str) -> Any:
     try:
         return row[name]
     except (KeyError, IndexError):
         return None
-
-def asn_key_from_raw(raw: dict[str, Any]) -> str | None:
-    as_text = str(raw.get("as") or "").strip()
-    match = re.search(r"\bAS\s*(\d+)\b", as_text, re.IGNORECASE)
-    if match:
-        return f"AS{match.group(1)}"
-    return None
-
-def asn_label_from_raw(raw: dict[str, Any]) -> str | None:
-    key = asn_key_from_raw(raw)
-    if not key:
-        return None
-    as_text = str(raw.get("as") or "").strip()
-    asname = str(raw.get("asname") or "").strip()
-    org = str(raw.get("org") or "").strip()
-    suffix = as_text
-    if suffix.upper().startswith(key.upper()):
-        suffix = suffix[len(key):].strip()
-    suffix = suffix or asname or org
-    return f"{key} {suffix}".strip()
-
-def asn_key_for_geo_row(row: sqlite3.Row) -> str | None:
-    return asn_key_from_raw(raw_geo_data(row))
 
 def ignored_rules_text_sync(cache_path: Path) -> str:
     counts = ignored_rule_counts_by_dimension_sync(cache_path)

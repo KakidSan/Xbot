@@ -17,7 +17,7 @@ class OperationDetailsTest(unittest.TestCase):
         self.assertEqual(alert_type_label("ip"), "IP 监控")
         self.assertEqual(
             alert_setting_before_after_detail("traffic", "默认规则", "旧", "新"),
-            "对象：默认规则\n范围：默认规则\n类型：流量告警\n修改前：旧\n修改后：新",
+            "范围：默认规则\n类型：流量告警\n修改前：旧\n修改后：新",
         )
         self.assertEqual(
             alert_setting_before_after_detail("ip", "独立规则", "旧", "新", 123),

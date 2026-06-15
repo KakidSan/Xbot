@@ -29,4 +29,4 @@ jobs:
         run: python -m compileall -q xbot xbot.py tests
 
       - name: Run unit tests
-        run: PYTHONPATH=. python -m unittest -q tests.test_operation_details tests.test_operation_logs
+        run: PYTHONPATH=. python -m unittest discover -q -s tests

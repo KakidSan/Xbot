@@ -52,6 +52,17 @@ from .authorization import (
     telegram_user_label_sync as telegram_user_label_from_cache,
 )
 from .context import BotContext
+from .operation_logs import (
+    alert_category,
+    alert_setting_before_after_detail,
+    log_operation_from_query as log_operation_from_query_with_cache,
+    log_operation_from_update as log_operation_from_update_with_cache,
+    operation_log_detail_keyboard,
+    operation_log_detail_text_sync,
+    operation_log_summary_text_sync,
+    operation_logs_menu_keyboard,
+    operation_logs_summary_keyboard,
+)
 from .version import version_command as handle_version_command, version_update_callback as handle_version_update_callback
 from ..db.cache import (
     active_user_button_items_from_cache_sync,
@@ -256,192 +267,6 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
         except Exception:
             cached = await asyncio.to_thread(ui_pref_get_sync, cache_path, uid, "telegram_label")
             return str(cached or f"用户 {uid}")
-
-    OPERATION_LOG_CATEGORIES = {
-        "traffic_alert": "流量告警规则调整",
-        "ip_alert": "IP 监控规则调整",
-        "ip_ignore": "IP 忽略调整",
-        "reset_cache": "重置缓存",
-        "reset_ip": "重置 IP 记录",
-        "parameter_config": "参数配置",
-        "auth": "授权管理",
-    }
-
-    def operation_logs_menu_keyboard(viewer_user_id: int) -> InlineKeyboardMarkup:
-        counts = operation_log_counts_sync(cache_path, viewer_user_id, list(OPERATION_LOG_CATEGORIES.keys()))
-
-        def button(text: str, category: str) -> InlineKeyboardButton:
-            unread, total = counts.get(category, (0, 0))
-            return InlineKeyboardButton(f"{text} ({unread}/{total})", callback_data=f"main_menu:op_logs:{category}")
-
-        rows = [
-            [button("🌊 流量告警规则", "traffic_alert")],
-            [button("🌐 IP 监控规则", "ip_alert")],
-            [button("🚧 IP 忽略调整", "ip_ignore")],
-            [button("🧹 重置缓存", "reset_cache")],
-            [button("👤 重置 IP 记录", "reset_ip")],
-            [button("🎨 参数配置", "parameter_config")],
-            [button("🔑 授权管理", "auth")],
-            [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ]
-        return InlineKeyboardMarkup(rows)
-
-    OPERATION_LOG_ACTION_ICONS = {
-        "auth": {
-            "增加授权": "🔐",
-            "删除授权": "🔓",
-            "权限变更": "🎭",
-        },
-        "traffic_alert": {
-            "调整默认周期": "💫",
-            "调整默认规则": "🎚️",
-            "调整独立周期": "💫",
-            "调整独立规则": "🌟",
-            "切换白名单": "🛡️",
-            "恢复默认规则": "♻️",
-        },
-        "ip_alert": {
-            "调整默认周期": "💫",
-            "调整默认规则": "🎚️",
-            "调整独立周期": "💫",
-            "调整独立规则": "🌟",
-            "切换白名单": "🛡️",
-            "恢复默认规则": "♻️",
-        },
-        "ip_ignore": {
-            "切换忽略": "🚧",
-            "解除忽略": "🚧",
-        },
-        "reset_cache": {
-            "调整统计起始点": "⚙️",
-            "全部重置缓存": "🗑",
-        },
-        "reset_ip": {
-            "重置特定用户 IP 记录": "👤",
-        },
-        "parameter_config": {
-            "调整缓存保留时间": "🗄",
-        },
-    }
-
-    def operation_log_action_label(category: str, action: str) -> str:
-        icon = OPERATION_LOG_ACTION_ICONS.get(category, {}).get(action)
-        return f"{icon} {action}" if icon and not action.startswith(icon) else action
-
-    def xboard_user_label_sync(uid: int) -> str:
-        return render_user_label(uid, cached_user_name_by_id(cache_path, uid))
-
-    def xboard_user_ids_to_labels(value: str) -> str:
-        def repl(match: re.Match[str]) -> str:
-            return xboard_user_label_sync(int(match.group(1)))
-
-        raw = value.strip()
-        if not raw:
-            return raw
-        return re.sub(r"(?<![\w@])(?:用户|XBoard 用户)\s*(\d+)(?![\w@])", repl, raw)
-
-    def operation_log_detail_display_text(category: str, detail: str) -> str:
-        if not detail:
-            return detail
-        converted: list[str] = []
-        auth_user_list_fields = {
-            "修改前管理员",
-            "修改后管理员",
-            "修改前普通用户",
-            "修改后普通用户",
-            "修改前",
-            "修改后",
-            "新增",
-            "删除",
-        }
-        xboard_user_fields = {"对象", "XBoard 用户", "用户"}
-        for line in detail.splitlines():
-            if "：" not in line:
-                converted.append(line)
-                continue
-            key, value = line.split("：", 1)
-            if category == "auth" and key in auth_user_list_fields:
-                converted.append(f"{key}：{auth_user_ids_to_labels_from_cache(bot_ctx.cache_path, value)}")
-            elif key in xboard_user_fields:
-                converted.append(f"{key}：{xboard_user_ids_to_labels(value)}")
-            else:
-                converted.append(line)
-        return "\n".join(converted)
-
-    def operation_logs_summary_keyboard(category: str, viewer_user_id: int) -> InlineKeyboardMarkup:
-        rows = []
-        logs = operation_logs_list_sync(cache_path, category, 20, viewer_user_id)
-        for row in logs:
-            log_id = int(row.get("id") or 0)
-            mark = "" if int(row.get("is_read") or 0) else "🆕 "
-            ts = datetime.fromtimestamp(int(row.get("created_at") or 0), BEIJING_TZ).strftime("%m-%d")
-            action = operation_log_action_label(category, str(row.get("action") or ""))
-            label = f"{mark}{ts} {action}"
-            rows.append([InlineKeyboardButton(label[:64], callback_data=f"main_menu:op_logs:{category}:{log_id}")])
-        if not rows:
-            rows.append([InlineKeyboardButton("暂无记录", callback_data="main_menu:noop")])
-        rows.append([InlineKeyboardButton("⬅️ 返回操作日志", callback_data="main_menu:op_logs"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
-        return InlineKeyboardMarkup(rows)
-
-    def operation_log_summary_text_sync(category: str, viewer_user_id: int) -> str:
-        label = OPERATION_LOG_CATEGORIES.get(category or "", "操作日志")
-        unread, total = operation_log_counts_sync(cache_path, viewer_user_id, [category]).get(category, (0, 0))
-        return "\n".join([
-            "📜 <b>操作日志</b>",
-            "────────────",
-            f"类型：{html.escape(label)}",
-            f"未读/全部：<b>{unread}/{total}</b>",
-            "",
-            "请选择一条记录查看详情。",
-        ])
-
-    def operation_log_detail_text_sync(log_id: int) -> str:
-        row = operation_log_get_sync(cache_path, log_id)
-        if not row:
-            return "📜 <b>操作日志详情</b>\n────────────\n记录不存在或已被删除。"
-        category = str(row.get("category") or "")
-        label = OPERATION_LOG_CATEGORIES.get(category, category or "操作日志")
-        ts = datetime.fromtimestamp(int(row.get("created_at") or 0), BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-        actor_name = html.escape(str(row.get("actor_name") or "未知用户"))
-        actor = actor_name
-        raw_action = str(row.get("action") or "")
-        action = html.escape(operation_log_action_label(category, raw_action))
-        detail = html.escape(operation_log_detail_display_text(category, str(row.get("detail") or "")))
-        lines = [
-            "📜 <b>操作日志详情</b>",
-            "────────────",
-            f"类型：{html.escape(label)}",
-            f"执行时间：<code>{ts}</code>",
-            f"Telegram 用户：{actor}",
-            f"执行操作：{action}",
-        ]
-        if detail:
-            lines.extend(["", "详情：", detail])
-        return "\n".join(lines)
-
-    def operation_log_detail_keyboard(category: str) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ 返回记录列表", callback_data=f"main_menu:op_logs:{category}")],
-            [InlineKeyboardButton("⬅️ 返回操作日志", callback_data="main_menu:op_logs"), InlineKeyboardButton("❌ 关闭", callback_data="close_message")],
-        ])
-
-    def log_operation_from_query(query: Any, category: str, action: str, detail: str = "") -> None:
-        user = getattr(query, "from_user", None)
-        operation_log_add_sync(cache_path, getattr(user, "id", None), actor_name_from_user(user), category, action, detail)
-
-    def log_operation_from_update(update: Update, category: str, action: str, detail: str = "") -> None:
-        user = update.effective_user
-        operation_log_add_sync(cache_path, getattr(user, "id", None), actor_name_from_user(user), category, action, detail)
-
-    def alert_category(alert_type: str) -> str:
-        return "traffic_alert" if alert_type == "traffic" else "ip_alert"
-
-    def alert_type_label(alert_type: str) -> str:
-        return "流量告警" if alert_type == "traffic" else "IP 监控"
-
-    def alert_setting_before_after_detail(alert_type: str, scope: str, before: str, after: str, xboard_user_id: int | None = None) -> str:
-        target = f"XBoard 用户 {xboard_user_id}" if xboard_user_id is not None else "默认规则"
-        return f"对象：{target}\n类型：{alert_type_label(alert_type)}\n修改前：{before}\n修改后：{after}"
 
     def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         rows = [
@@ -1761,7 +1586,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             floor_ts = int(floor_confirm_match.group(1))
             was_debug_reset = bool(context.user_data.get("traffic_custom", {}).get("debug"))
             counts = await asyncio.to_thread(prune_stats_before_sync, cache_path, floor_ts)
-            await asyncio.to_thread(log_operation_from_query, query, "reset_cache", "调整统计起始点", f"{format_timestamp(floor_ts)}，流量样本 {counts['traffic_delta_samples']} 条")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "reset_cache", "调整统计起始点", f"{format_timestamp(floor_ts)}，流量样本 {counts['traffic_delta_samples']} 条")
             context.user_data.pop("traffic_custom", None)
             await query.answer("统计起始点已重置")
             text = (
@@ -1978,7 +1803,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             if data == "main_menu:op_logs":
                 await answer_callback_silently(query)
-                keyboard = await asyncio.to_thread(operation_logs_menu_keyboard, query.from_user.id)
+                keyboard = await asyncio.to_thread(operation_logs_menu_keyboard, bot_ctx.cache_path, query.from_user.id)
                 await show_callback_page(query, "📜 <b>操作日志</b>\n────────────\n请选择要查看的操作类型。\n\n按钮括号为：未读日志数量/所有日志数量。", keyboard, parse_mode="HTML")
                 return
             detail_match = re.fullmatch(r"main_menu:op_logs:(traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|auth):(\d+)", data)
@@ -1987,14 +1812,14 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 log_id = int(detail_match.group(2))
                 await asyncio.to_thread(operation_log_mark_read_sync, cache_path, query.from_user.id, log_id)
                 await query.answer("已标记为已读")
-                await show_callback_page(query, await asyncio.to_thread(operation_log_detail_text_sync, log_id), operation_log_detail_keyboard(category), parse_mode="HTML")
+                await show_callback_page(query, await asyncio.to_thread(operation_log_detail_text_sync, bot_ctx.cache_path, log_id), operation_log_detail_keyboard(category), parse_mode="HTML")
                 return
             log_match = re.fullmatch(r"main_menu:op_logs:(traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|auth)", data)
             if log_match:
                 category = log_match.group(1)
                 await answer_callback_silently(query)
-                text = await asyncio.to_thread(operation_log_summary_text_sync, category, query.from_user.id)
-                keyboard = await asyncio.to_thread(operation_logs_summary_keyboard, category, query.from_user.id)
+                text = await asyncio.to_thread(operation_log_summary_text_sync, bot_ctx.cache_path, category, query.from_user.id)
+                keyboard = await asyncio.to_thread(operation_logs_summary_keyboard, bot_ctx.cache_path, category, query.from_user.id)
                 await show_callback_page(query, text, keyboard, parse_mode="HTML")
                 return
 
@@ -2065,7 +1890,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 cfg.telegram.authorized_user_ids = new_users
                 after_managers = sorted(new_managers)
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_query, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
+                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "权限变更", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}")
                 context.user_data.pop("auth_role_changes", None)
                 await query.answer("权限变更已保存")
                 await show_callback_page(query, "✅ 权限变更已保存。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
@@ -2122,7 +1947,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 cfg.telegram.authorized_user_ids = new_users
                 after_managers = sorted(new_managers)
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_query, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
+                await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "auth", "删除授权", f"修改前管理员：{', '.join(str(uid) for uid in before_managers) or '空'}\n修改后管理员：{', '.join(str(uid) for uid in after_managers) or '空'}\n修改前普通用户：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后普通用户：{', '.join(str(uid) for uid in after_users) or '空'}\n删除：{', '.join(str(uid) for uid in sorted(user_ids))}")
                 context.user_data.pop("auth_delete_selected", None)
                 await query.answer("授权已删除")
                 await show_callback_page(query, "✅ 已删除所选授权用户。\n变更已保存。", authorization_manage_keyboard_for_cfg(is_super_admin), parse_mode="HTML")
@@ -2280,7 +2105,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query, query, "ip_ignore", "解除忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "解除忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
             await query.answer("已解除忽略")
             await show_callback_page(
                 query,
@@ -2318,7 +2143,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{value}\n修改前：{'已忽略' if value in before_values else '未忽略'}\n修改后：{'已忽略' if value in after_values else '未忽略'}")
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -2370,7 +2195,8 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             days, label = CACHE_RETENTION_OPTIONS[option_key]
             stats = await asyncio.to_thread(cache_retention_set_and_prune_sync, cache_path, days)
             await asyncio.to_thread(
-                log_operation_from_query,
+                log_operation_from_query_with_cache,
+                bot_ctx.cache_path,
                 query,
                 "parameter_config",
                 "调整缓存保留时间",
@@ -2429,7 +2255,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await query.answer("请先选择重置方式", show_alert=True)
                 return
             stats = await asyncio.to_thread(reset_local_cache_sync, cache_path)
-            await asyncio.to_thread(log_operation_from_query, query, "reset_cache", "全部重置缓存", f"流量样本 {stats['traffic_delta_samples']} 条，活跃 IP {stats['active_ip_records']} 条")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "reset_cache", "全部重置缓存", f"流量样本 {stats['traffic_delta_samples']} 条，活跃 IP {stats['active_ip_records']} 条")
             await query.answer("缓存已重置")
             await show_callback_page(
                 query,
@@ -2544,7 +2370,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await query.answer("选择状态已过期，请重新选择用户", show_alert=True)
                 return
             stats = await asyncio.to_thread(clear_user_ip_records_multi_sync, cache_path, user_ids)
-            await asyncio.to_thread(log_operation_from_query, query, "reset_ip", "重置特定用户 IP 记录", f"用户 {', '.join(str(uid) for uid in user_ids)}；记录 {stats['records']} 条")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "reset_ip", "重置特定用户 IP 记录", f"用户 {', '.join(str(uid) for uid in user_ids)}；记录 {stats['records']} 条")
             context.user_data.pop("reset_user_ip_selected", None)
             await query.answer("已标记忽略所选用户 IP 记录")
             await show_callback_page(
@@ -2842,7 +2668,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, ignore_value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -2874,7 +2700,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
             enabled = await asyncio.to_thread(ignored_rule_toggle_sync, cache_path, dimension, ignore_value)
             after_values = await asyncio.to_thread(ignored_rule_values_sync, cache_path, dimension)
-            await asyncio.to_thread(log_operation_from_query, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "ip_ignore", "切换忽略", f"维度：{dimension}\n对象：{ignore_value}\nXBoard 用户：{xboard_user_id}\n修改前：{'已忽略' if ignore_value in before_values else '未忽略'}\n修改后：{'已忽略' if ignore_value in after_values else '未忽略'}")
             title = {"area": "忽略地区", "asn": "忽略 ASN", "cidr": "忽略 IP"}[dimension]
             await query.answer("已加入忽略" if enabled else "已取消忽略")
             await show_callback_page(
@@ -3026,7 +2852,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             before = f"{alert_period_label(await asyncio.to_thread(alert_global_period_sync, cache_path, alert_type))} / {format_bytes(await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)) if alert_type == 'traffic' else str(await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)) + ' 个城市'}"
             await asyncio.to_thread(alert_set_global_period_sync, cache_path, alert_type, period)
             after = f"{alert_period_label(period)} / {format_bytes(await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)) if alert_type == 'traffic' else str(await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)) + ' 个城市'}"
-            await asyncio.to_thread(log_operation_from_query, query, alert_category(alert_type), "调整默认周期", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整默认周期", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
             text = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
             await query.answer("默认周期已保存")
             await show_callback_page(query, text, alert_global_keyboard(alert_type), parse_mode="HTML")
@@ -3045,7 +2871,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await asyncio.to_thread(alert_upsert_setting_sync, cache_path, xboard_user_id, ip_period=period, ip_whitelist=0)
             after_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             after = alert_setting_label(after_setting, alert_type, cache_path)
-            await asyncio.to_thread(log_operation_from_query, query, alert_category(alert_type), "调整独立周期", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整独立周期", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("周期已保存")
             await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
@@ -3079,7 +2905,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await asyncio.to_thread(alert_upsert_setting_sync, cache_path, xboard_user_id, ip_city_threshold=value, ip_whitelist=0)
             after_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             after = alert_setting_label(after_setting, alert_type, cache_path)
-            await asyncio.to_thread(log_operation_from_query, query, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("规则已保存")
             await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
@@ -3099,7 +2925,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 await asyncio.to_thread(alert_upsert_setting_sync, cache_path, xboard_user_id, ip_whitelist=new_value)
             after_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             after = alert_setting_label(after_setting, alert_type, cache_path)
-            await asyncio.to_thread(log_operation_from_query, query, alert_category(alert_type), "切换白名单", alert_setting_before_after_detail(alert_type, "白名单", before, after, xboard_user_id))
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "切换白名单", alert_setting_before_after_detail(alert_type, "白名单", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("白名单已更新")
             await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
@@ -3114,7 +2940,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(alert_reset_setting_sync, cache_path, xboard_user_id, alert_type)
             after_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             after = alert_setting_label(after_setting, alert_type, cache_path)
-            await asyncio.to_thread(log_operation_from_query, query, alert_category(alert_type), "恢复默认规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
+            await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, alert_category(alert_type), "恢复默认规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             text = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await query.answer("已恢复默认")
             await show_callback_page(query, text, alert_user_setting_keyboard(alert_type, xboard_user_id), parse_mode="HTML")
@@ -3211,7 +3037,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 new_users = await asyncio.to_thread(update_authorized_users_in_cache_sync, cache_path, cfg.telegram.super_admin_user_ids, cfg.telegram.manager_user_ids, cfg.telegram.authorized_user_ids, target_uid, None)
                 cfg.telegram.authorized_user_ids = new_users
                 after_users = sorted(new_users)
-                await asyncio.to_thread(log_operation_from_update, update, "auth", "增加授权", f"修改前：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后：{', '.join(str(uid) for uid in after_users) or '空'}\n新增：{target_uid}")
+                await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, "auth", "增加授权", f"修改前：{', '.join(str(uid) for uid in before_users) or '空'}\n修改后：{', '.join(str(uid) for uid in after_users) or '空'}\n新增：{target_uid}")
             except ValueError as exc:
                 await reply_cover_card(
                     update,
@@ -3354,7 +3180,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
             await asyncio.to_thread(alert_set_global_threshold_sync, cache_path, alert_type, value)
             after_threshold = await asyncio.to_thread(alert_global_threshold_sync, cache_path, alert_type)
             after = f"{alert_period_label(before_period)} / {format_bytes(after_threshold) if alert_type == 'traffic' else str(after_threshold) + ' 个城市'}"
-            await asyncio.to_thread(log_operation_from_update, update, alert_category(alert_type), "调整默认规则", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
+            await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, alert_category(alert_type), "调整默认规则", alert_setting_before_after_detail(alert_type, "默认规则", before, after))
             result = await asyncio.to_thread(alert_global_setting_text_sync, cache_path, alert_type)
             await edit_global_alert_prompt(result, alert_global_keyboard(alert_type), "HTML")
             await context_bot_delete_message(input_chat_id, input_message_id)
@@ -3437,7 +3263,7 @@ def build_application(cfg: AppConfig, cache_path: Path) -> Application:
                 return
             after_setting = await asyncio.to_thread(alert_user_setting_sync, cache_path, xboard_user_id)
             after = alert_setting_label(after_setting, alert_type, cache_path)
-            await asyncio.to_thread(log_operation_from_update, update, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
+            await asyncio.to_thread(log_operation_from_update_with_cache, bot_ctx.cache_path, update, alert_category(alert_type), "调整独立规则", alert_setting_before_after_detail(alert_type, "独立规则", before, after, xboard_user_id))
             result = await asyncio.to_thread(alert_user_setting_text_sync, cache_path, alert_type, xboard_user_id)
             await edit_alert_prompt(result, alert_user_setting_keyboard(alert_type, xboard_user_id), "HTML")
             await context_bot_delete_message(input_chat_id, input_message_id)

@@ -15,7 +15,7 @@ from .operation_logs import operation_logs_callback
 from .parameters import parameter_callback
 
 
-async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, bot_ctx: BotContext, cache_path: Path, cache_retention_text_sync, cache_retention_preview_text, show_initialization_gate, answer_callback_silently, show_callback_page, send_start_menu, open_dashboard_card, purge_chat_history, resolve_telegram_user_label, reply_long_text) -> None:
+async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, bot_ctx: BotContext, cache_path: Path, cache_retention_text_sync, cache_retention_preview_text, show_initialization_gate, answer_callback_silently, show_callback_page, send_start_menu, open_dashboard_card, purge_chat_history, resolve_telegram_user_label, reply_long_text, send_or_jump_traffic_dashboard, traffic_custom_state, traffic_custom_prompt_text) -> None:
     query = update.callback_query
     if not query or not query.message:
         return

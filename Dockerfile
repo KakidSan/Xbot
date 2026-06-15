@@ -24,10 +24,11 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY xbot.py ./
+COPY xbot ./xbot
 COPY VERSION ./
 COPY scripts ./scripts
 
 RUN mkdir -p /app/data /app/logs /app/.install-state \
     && chmod +x /app/scripts/update.sh 2>/dev/null || true
 
-CMD ["python", "/app/xbot.py"]
+CMD ["python", "-m", "xbot"]

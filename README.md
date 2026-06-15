@@ -154,3 +154,27 @@ Soga: soga_conn_<user_id>_<ip>
 ```
 
 注意：Soga 2.13.x 实测不是 `soga:ip:<user_id>:<ip>`。`soga_conn_*` 属于 Soga 的连接/IP 限制缓存；如果用户没有有效设备/IP 限制，Soga 可能不会为该用户写入此类 Key。
+
+## 代码模块结构
+
+2.0-Beta 之后代码开始按职责拆分为 Python package：
+
+```text
+xbot/
+  __main__.py          # Docker/CLI 入口：python -m xbot
+  config.py            # AppConfig / dataclasses / 环境变量加载
+  db/
+    cache.py           # SQLite init + CRUD
+    mysql.py           # XBoard 只读查询
+    redis.py           # Heki/Soga 在线 IP 采集
+  bot/
+    handlers.py        # Telegram command/callback handlers
+    keyboards.py       # InlineKeyboardMarkup 构造
+    formatters.py      # 文本渲染
+  collector.py         # 定时采集循环
+  geo.py               # IP geo 查询 + 缓存
+  alerts.py            # 流量/IP 告警逻辑
+  updater.py           # 版本检查 + Docker Compose 后台更新
+```
+
+`xbot.py` 仍保留为兼容包装入口；Docker 镜像默认使用 `python -m xbot`。

@@ -43,6 +43,7 @@ from ..keyboards import (
     user_ip_query_page_keyboard,
 )
 from ..menus import back_close_row
+from ..messaging import traffic_custom_enter_initial_step, traffic_fixed_range
 from ..operation_logs import log_operation_from_query as log_operation_from_query_with_cache
 from ...db.cache import make_range_kind
 from ..permissions import is_allowed, is_bot_self_update
@@ -227,7 +228,7 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state = traffic_custom_state(context)
         state.clear()
         state.update({"mode": "ip_custom", "phase": "start"})
-        traffic_custom_enter_initial_step(state)
+        traffic_custom_enter_initial_step(cache_path, state)
         await answer_callback_silently(query)
         await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
         return
@@ -238,7 +239,7 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state = traffic_custom_state(context)
         state.clear()
         state.update({"mode": "custom", "dimension": dimension, "phase": "start"})
-        traffic_custom_enter_initial_step(state)
+        traffic_custom_enter_initial_step(cache_path, state)
         await answer_callback_silently(query)
         await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
         return
@@ -346,7 +347,7 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             for k in ("year", "month", "day", "hour", "minute"):
                 state.pop(k, None)
             state.update({"phase": "end"})
-            traffic_custom_enter_initial_step(state)
+            traffic_custom_enter_initial_step(cache_path, state)
             await query.answer("开始时间已选择")
             await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
             return

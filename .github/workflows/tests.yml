@@ -51,8 +51,8 @@ jobs:
       - name: Run unit tests with coverage gate
         run: |
           PYTHONPATH=. python -m coverage run \
-            --source=xbot.bot.operation_details,xbot.bot.operation_logs,xbot.bot.formatters,xbot.bot.keyboards,xbot.bot.handlers.parameters,xbot.bot.handlers.text_input,xbot.node_monitor,xbot.db.cache._core \
+            --source=xbot.bot.application,xbot.bot.router,xbot.bot.callback_data,xbot.bot.operation_details,xbot.bot.operation_logs,xbot.bot.formatters,xbot.bot.keyboards,xbot.bot.handlers.parameters,xbot.bot.handlers.text_input,xbot.node_monitor,xbot.db.cache._core \
             -m unittest discover -q -s tests
           python -m coverage report \
-            --include='xbot/bot/operation_details.py,xbot/bot/operation_logs.py,xbot/bot/formatters.py,xbot/bot/keyboards.py,xbot/bot/handlers/parameters.py,xbot/bot/handlers/text_input.py,xbot/node_monitor.py,xbot/db/cache/_core.py' \
+            --include='xbot/bot/application.py,xbot/bot/router.py,xbot/bot/callback_data.py,xbot/bot/operation_details.py,xbot/bot/operation_logs.py,xbot/bot/formatters.py,xbot/bot/keyboards.py,xbot/bot/handlers/parameters.py,xbot/bot/handlers/text_input.py,xbot/node_monitor.py,xbot/db/cache/_core.py' \
             --fail-under=30

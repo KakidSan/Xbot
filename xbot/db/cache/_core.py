@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..common import (
+from ...common import (
     ALERT_DEFAULT_PERIOD,
     ALERT_PERIOD_LABELS,
     Any,
@@ -28,7 +28,7 @@ from ..common import (
     sqlite3,
     timedelta,
 )
-from .mysql import collect_traffic_counters_sync, fetch_user_display_details_sync, fetch_all_user_display_details_sync
+from ..mysql import collect_traffic_counters_sync, fetch_user_display_details_sync, fetch_all_user_display_details_sync
 
 def _normalize_geo_name(value: Any) -> str:
     return str(value or "").strip()

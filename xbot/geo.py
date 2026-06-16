@@ -15,7 +15,6 @@ from .common import (
 from .db.cache import (
     apply_ignored_rules_conn,
     asn_key_from_raw,
-    build_geo_stat_area,
     cache_connect,
     ignored_rule_counts_by_dimension_sync,
     init_cache,

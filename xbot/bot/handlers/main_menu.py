@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ...common import BadRequest, ContextTypes, Path, Update, asyncio, html, is_admin_user_id, re, timedelta
+from ...common import BadRequest, ContextTypes, NOTIFICATION_KINDS, Path, Update, asyncio, html, is_admin_user_id, log, re, timedelta
 from ...config import AppConfig
-from ...db.cache import initialization_acknowledge_sync, notification_toggle_sync, ui_pref_get_sync
+from ...db.cache import initialization_acknowledge_sync, list_user_ips_from_cache_sync, notification_toggle_sync, ui_pref_get_sync
 from ..context import BotContext
 from ..formatters import bot_health_overview_text_sync, notification_ip_alert_mode_label
 from ..keyboards import active_users_keyboard, notification_push_keyboard
@@ -28,7 +28,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
     if data == "main_menu:init_ack":
         await asyncio.to_thread(initialization_acknowledge_sync, cache_path)
         await query.answer("初始化已确认")
-        if query.message:
+        if query.message and hasattr(query.message, "delete"):
             try:
                 await query.message.delete()
             except Exception as exc:
@@ -241,7 +241,8 @@ async def handle_close_message_callback(update: Update, context: ContextTypes.DE
         return
     await query.answer("已关闭")
     try:
-        await query.message.delete()
+        if hasattr(query.message, "delete"):
+            await query.message.delete()
     except BadRequest:
         pass
 

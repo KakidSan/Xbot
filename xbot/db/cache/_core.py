@@ -891,7 +891,7 @@ def default_allowlist_notification_chats_sync(cache_path: Path, cfg: AppConfig, 
     if kind not in DEFAULT_ALLOWLIST_NOTIFICATION_KINDS:
         return notification_enabled_chats_sync(cache_path, kind)
     init_cache(cache_path)
-    chats = {str(uid) for uid in cfg.telegram.allowed_user_ids}
+    chats: set[str] = {str(uid) for uid in cfg.telegram.allowed_user_ids}
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
             "SELECT chat_id, enabled FROM notification_subscriptions WHERE kind = ?",
@@ -2382,18 +2382,18 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 ORDER BY last_seen_at DESC
                 """
             ).fetchall()
-            buckets: dict[str, dict[str, Any]] = {}
+            cidr_buckets: dict[str, dict[str, Any]] = {}
             for row in rows:
                 cidr = ipv4_24_cidr(str(row["ip"] or ""))
                 if not cidr:
                     continue
-                bucket = buckets.setdefault(cidr, {"value": cidr, "label": cidr, "ips": set(), "users": set(), "last_seen_at": 0})
+                bucket = cidr_buckets.setdefault(cidr, {"value": cidr, "label": cidr, "ips": set(), "users": set(), "last_seen_at": 0})
                 bucket["ips"].add(str(row["ip"]))
                 bucket["users"].add(int(row["user_id"]))
                 bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
             return [
                 {"value": cidr, "label": cidr, "sub": f"{len(bucket['ips'])} IP / {len(bucket['users'])} 用户", "last_seen_at": int(bucket["last_seen_at"])}
-                for cidr, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
+                for cidr, bucket in sorted(cidr_buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
             ]
     return []
 

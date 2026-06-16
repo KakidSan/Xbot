@@ -1,5 +1,32 @@
 from __future__ import annotations
 
+from typing import Any
+
+
+def _callback(namespace: str, *parts: Any) -> str:
+    return ":".join((namespace, *(str(part) for part in parts))) if parts else namespace
+
+
+def cb_auth(*parts: Any) -> str:
+    return _callback("auth", *parts)
+
+
+def cb_ip_monitor(*parts: Any) -> str:
+    return _callback("ip_monitor", *parts)
+
+
+def cb_params(*parts: Any) -> str:
+    return _callback("params", *parts)
+
+
+def cb_notify(*parts: Any) -> str:
+    return _callback("notify", *parts)
+
+
+def cb_debug(*parts: Any) -> str:
+    return _callback("debug", *parts)
+
+
 VERSION_UPDATE_PATTERN = r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$"
 MAIN_MENU_PATTERN = r"^main_menu(?::(?:init_ack|clear_history|clear_history_confirm|system_check|system_check_refresh|traffic_management|traffic_users|traffic_nodes|traffic_alerts))?$"
 MAIN_MENU_OP_LOGS_PATTERN = r"^main_menu:op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?$"

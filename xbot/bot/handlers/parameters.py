@@ -18,7 +18,7 @@ from ...db.cache import (
     speedtest_jump_targets_sync,
     ui_pref_delete_sync,
 )
-from ..callback_data import normalize_main_menu_callback
+from ..callback_data import cb_params, normalize_main_menu_callback
 from ..context import BotContext, user_data_of
 from ..keyboards import cache_retention_confirm_keyboard, cache_retention_keyboard
 from ..menus import (
@@ -92,13 +92,13 @@ def speedtest_jump_keyboard() -> Any:
             [
                 InlineKeyboardButton(
                     "➕ 添加工具",
-                    callback_data="params:speedtest_jump:add",
+                    callback_data=cb_params("speedtest_jump", "add"),
                 )
             ],
             [
                 InlineKeyboardButton(
                     "➖ 删除工具",
-                    callback_data="params:speedtest_jump:delete:0",
+                    callback_data=cb_params("speedtest_jump", "delete", 0),
                 )
             ],
             back_close_row("params", "⬅️ 返回个人设置"),
@@ -124,7 +124,9 @@ def speedtest_jump_delete_keyboard(
             [
                 InlineKeyboardButton(
                     str(row["nickname"])[:60],
-                    callback_data=f"params:speedtest_jump:delete_target:{int(row['telegram_id'])}:{page}",
+                    callback_data=cb_params(
+                        "speedtest_jump", "delete_target", int(row["telegram_id"]), page
+                    ),
                 )
             ]
         )
@@ -133,7 +135,7 @@ def speedtest_jump_delete_keyboard(
         nav.append(
             InlineKeyboardButton(
                 "⬅️ 上一页",
-                callback_data=f"params:speedtest_jump:delete:{page - 1}",
+                callback_data=cb_params("speedtest_jump", "delete", page - 1),
             )
         )
     nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"))
@@ -141,7 +143,7 @@ def speedtest_jump_delete_keyboard(
         nav.append(
             InlineKeyboardButton(
                 "下一页 ➡️",
-                callback_data=f"params:speedtest_jump:delete:{page + 1}",
+                callback_data=cb_params("speedtest_jump", "delete", page + 1),
             )
         )
     rows.append(nav)

@@ -145,6 +145,18 @@ class CallbackDataPatternTest(unittest.TestCase):
         self.assertMatches(callback_data.NODE_LINK_PATTERN, "node_link:select:123:0")
         self.assertNotMatches(callback_data.NODE_LINK_PATTERN, "node_link:select:abc:0")
 
+    def test_callback_builders(self) -> None:
+        self.assertEqual(callback_data.cb_auth(), "auth")
+        self.assertEqual(
+            callback_data.cb_auth("role_toggle", 123), "auth:role_toggle:123"
+        )
+        self.assertEqual(
+            callback_data.cb_ip_monitor("ignore", "area", 0), "ip_monitor:ignore:area:0"
+        )
+        self.assertEqual(callback_data.cb_params("cover_reset"), "params:cover_reset")
+        self.assertEqual(callback_data.cb_notify("daily"), "notify:daily")
+        self.assertEqual(callback_data.cb_debug("tools"), "debug:tools")
+
     def test_normalize_new_namespaces_to_existing_handler_values(self) -> None:
         cases = {
             "main_menu:auth:add": "auth:add",

@@ -39,16 +39,13 @@ jobs:
               importlib.import_module(name)
           PY
 
-      - name: Ruff lint (non-blocking)
-        continue-on-error: true
+      - name: Ruff lint
         run: python -m ruff check xbot tests
 
-      - name: Ruff format check (non-blocking)
-        continue-on-error: true
+      - name: Ruff format check
         run: python -m ruff format --check xbot tests
 
-      - name: Mypy type check (non-blocking)
-        continue-on-error: true
+      - name: Mypy type check
         run: python -m mypy xbot
 
       - name: Run unit tests with coverage gate

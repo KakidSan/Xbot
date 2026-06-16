@@ -86,12 +86,10 @@ class LinkExtractionSettingsTest(unittest.TestCase):
                 speedtest_jump_delete_keyboard(cache_path, 100)
             )
 
-        self.assertIn("main_menu:parameter_config:speedtest_jump:add", root_callbacks)
+        self.assertIn("params:speedtest_jump:add", root_callbacks)
+        self.assertIn("params:speedtest_jump:delete:0", root_callbacks)
         self.assertIn(
-            "main_menu:parameter_config:speedtest_jump:delete:0", root_callbacks
-        )
-        self.assertIn(
-            "main_menu:parameter_config:speedtest_jump:delete_target:-123456:0",
+            "params:speedtest_jump:delete_target:-123456:0",
             delete_callbacks,
         )
 

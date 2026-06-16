@@ -55,14 +55,12 @@ def auth_user_ids_to_labels(cache_path, value: str) -> str:
 def authorization_manage_keyboard(super_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton("🔐 添加授权", callback_data="main_menu:auth:add"),
-            InlineKeyboardButton("🔓 删除授权", callback_data="main_menu:auth:delete"),
+            InlineKeyboardButton("🔐 添加授权", callback_data="auth:add"),
+            InlineKeyboardButton("🔓 删除授权", callback_data="auth:delete"),
         ]
     ]
     if super_admin:
-        rows.append(
-            [InlineKeyboardButton("🎭 权限变更", callback_data="main_menu:auth:roles")]
-        )
+        rows.append([InlineKeyboardButton("🎭 权限变更", callback_data="auth:roles")])
     rows.append(
         [
             InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu"),
@@ -93,19 +91,11 @@ def authorization_delete_keyboard(
         mark = "✅ " if uid in selected else ""
         label = f"{mark}{emoji} {telegram_user_label_sync(cache_path, uid)} ({uid})"
         rows.append(
-            [
-                InlineKeyboardButton(
-                    label[:64], callback_data=f"main_menu:auth:del_toggle:{uid}"
-                )
-            ]
+            [InlineKeyboardButton(label[:64], callback_data=f"auth:del_toggle:{uid}")]
         )
     if rows:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    "✅ 完成选择", callback_data="main_menu:auth:del_done"
-                )
-            ]
+            [InlineKeyboardButton("✅ 完成选择", callback_data="auth:del_done")]
         )
     else:
         rows.append(
@@ -113,7 +103,7 @@ def authorization_delete_keyboard(
         )
     rows.append(
         [
-            InlineKeyboardButton("⬅️ 返回授权管理", callback_data="main_menu:auth"),
+            InlineKeyboardButton("⬅️ 返回授权管理", callback_data="auth"),
             InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
         ]
     )
@@ -123,15 +113,9 @@ def authorization_delete_keyboard(
 def authorization_delete_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("✅ 确认删除", callback_data="auth:del_confirm")],
             [
-                InlineKeyboardButton(
-                    "✅ 确认删除", callback_data="main_menu:auth:del_confirm"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⬅️ 返回选择", callback_data="main_menu:auth:delete"
-                ),
+                InlineKeyboardButton("⬅️ 返回选择", callback_data="auth:delete"),
                 InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
             ],
         ]
@@ -185,17 +169,13 @@ def authorization_role_change_keyboard(
             [
                 InlineKeyboardButton(
                     f"{emoji} {telegram_user_label_sync(cache_path, uid)} ({uid})"[:64],
-                    callback_data=f"main_menu:auth:role_toggle:{uid}",
+                    callback_data=f"auth:role_toggle:{uid}",
                 )
             ]
         )
     if candidates:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    "💾 保存变更", callback_data="main_menu:auth:role_save"
-                )
-            ]
+            [InlineKeyboardButton("💾 保存变更", callback_data="auth:role_save")]
         )
     else:
         rows.append(
@@ -207,7 +187,7 @@ def authorization_role_change_keyboard(
         )
     rows.append(
         [
-            InlineKeyboardButton("⬅️ 返回授权管理", callback_data="main_menu:auth"),
+            InlineKeyboardButton("⬅️ 返回授权管理", callback_data="auth"),
             InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
         ]
     )

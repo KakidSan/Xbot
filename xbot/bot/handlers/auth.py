@@ -41,13 +41,13 @@ async def auth_callback(
     show_callback_page,
     resolve_telegram_user_label,
 ) -> bool | None:
-    if not data.startswith("main_menu:auth"):
+    if not data.startswith("auth"):
         return False
     if not is_admin_user_id(query.from_user.id, cfg):
         await query.answer("只有管理员可以使用授权管理", show_alert=True)
         return None
     is_super_admin = is_super_admin_user_id(query.from_user.id, cfg)
-    if data == "main_menu:auth":
+    if data == "auth":
         user_data_of(context).pop("awaiting_auth_add_user_id", None)
         user_data_of(context).pop("auth_delete_selected", None)
         user_data_of(context).pop("auth_role_changes", None)
@@ -74,7 +74,7 @@ async def auth_callback(
         await show_callback_page(
             query,
             "🔐 <b>添加授权</b>\n────────────\n请输入要授权的 Telegram 用户 ID、@用户名 或 t.me 链接。",
-            InlineKeyboardMarkup([back_close_row("main_menu:auth", "⬅️ 返回授权管理")]),
+            InlineKeyboardMarkup([back_close_row("auth", "⬅️ 返回授权管理")]),
             parse_mode="HTML",
         )
         return None

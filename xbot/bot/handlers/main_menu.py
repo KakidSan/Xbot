@@ -39,6 +39,7 @@ from ..menus import (
     traffic_management_keyboard,
 )
 from .auth import auth_callback
+from ..callback_data import normalize_main_menu_callback
 from .debug import debug_callback
 from .ip_monitor import ip_monitor_callback
 from ..permissions import is_allowed, is_bot_self_update
@@ -75,7 +76,7 @@ async def handle_main_menu_callback(
             return
         await query.answer("未授权，无法使用该功能", show_alert=True)
         return None
-    data = query.data or ""
+    data = normalize_main_menu_callback(query.data or "")
     if data == "main_menu:init_ack":
         await asyncio.to_thread(initialization_acknowledge_sync, cache_path)
         await query.answer("初始化已确认")

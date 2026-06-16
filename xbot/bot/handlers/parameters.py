@@ -55,16 +55,16 @@ def speedtest_jump_keyboard() -> Any:
             [
                 InlineKeyboardButton(
                     "➕ 添加工具",
-                    callback_data="main_menu:parameter_config:speedtest_jump:add",
+                    callback_data="params:speedtest_jump:add",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "➖ 删除工具",
-                    callback_data="main_menu:parameter_config:speedtest_jump:delete:0",
+                    callback_data="params:speedtest_jump:delete:0",
                 )
             ],
-            back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
+            back_close_row("params", "⬅️ 返回个人设置"),
         ]
     )
 
@@ -87,7 +87,7 @@ def speedtest_jump_delete_keyboard(
             [
                 InlineKeyboardButton(
                     str(row["nickname"])[:60],
-                    callback_data=f"main_menu:parameter_config:speedtest_jump:delete_target:{int(row['telegram_id'])}:{page}",
+                    callback_data=f"params:speedtest_jump:delete_target:{int(row['telegram_id'])}:{page}",
                 )
             ]
         )
@@ -96,7 +96,7 @@ def speedtest_jump_delete_keyboard(
         nav.append(
             InlineKeyboardButton(
                 "⬅️ 上一页",
-                callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page - 1}",
+                callback_data=f"params:speedtest_jump:delete:{page - 1}",
             )
         )
     nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"))
@@ -104,13 +104,11 @@ def speedtest_jump_delete_keyboard(
         nav.append(
             InlineKeyboardButton(
                 "下一页 ➡️",
-                callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page + 1}",
+                callback_data=f"params:speedtest_jump:delete:{page + 1}",
             )
         )
     rows.append(nav)
-    rows.append(
-        back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")
-    )
+    rows.append(back_close_row("params:speedtest_jump", "⬅️ 返回测试工具"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -128,9 +126,9 @@ async def parameter_callback(
     cache_retention_text_sync,
     cache_retention_preview_text,
 ) -> bool | None:
-    if not data.startswith("main_menu:parameter_config"):
+    if not data.startswith("params"):
         return False
-    if data == "main_menu:parameter_config":
+    if data == "params":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -139,7 +137,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:speedtest_jump":
+    if data == "params:speedtest_jump":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -151,7 +149,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:speedtest_jump:add":
+    if data == "params:speedtest_jump:add":
         user_data_of(context)["awaiting_speedtest_jump_id"] = True
         user_data_of(context).pop("awaiting_custom_cover", None)
         user_data_of(context).pop("awaiting_custom_nickname", None)
@@ -164,9 +162,7 @@ async def parameter_callback(
         )
         return None
 
-    delete_match = re.fullmatch(
-        r"main_menu:parameter_config:speedtest_jump:delete:(\d+)", data
-    )
+    delete_match = re.fullmatch(r"params:speedtest_jump:delete:(\d+)", data)
     if delete_match:
         page = int(delete_match.group(1))
         await answer_callback_silently(query)
@@ -183,7 +179,7 @@ async def parameter_callback(
         return None
 
     delete_target_match = re.fullmatch(
-        r"main_menu:parameter_config:speedtest_jump:delete_target:(-?\d+):(\d+)", data
+        r"params:speedtest_jump:delete_target:(-?\d+):(\d+)", data
     )
     if delete_target_match:
         target_id = int(delete_target_match.group(1))
@@ -204,7 +200,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:cache_retention":
+    if data == "params:cache_retention":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -215,7 +211,7 @@ async def parameter_callback(
         return None
 
     retention_select_match = re.fullmatch(
-        r"main_menu:parameter_config:cache_retention_select:(1m|1y|all)", data
+        r"params:cache_retention_select:(1m|1y|all)", data
     )
     if retention_select_match:
         option_key = retention_select_match.group(1)
@@ -233,7 +229,7 @@ async def parameter_callback(
         return None
 
     retention_confirm_match = re.fullmatch(
-        r"main_menu:parameter_config:cache_retention_confirm:(1m|1y|all)", data
+        r"params:cache_retention_confirm:(1m|1y|all)", data
     )
     if retention_confirm_match:
         option_key = retention_confirm_match.group(1)
@@ -266,7 +262,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:cover":
+    if data == "params:cover":
         user_data_of(context)["awaiting_custom_cover"] = True
         user_data_of(context).pop("awaiting_custom_nickname", None)
         await answer_callback_silently(query)
@@ -277,7 +273,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:cover_reset":
+    if data == "params:cover_reset":
         user_data_of(context).pop("awaiting_custom_cover", None)
         await asyncio.to_thread(
             ui_pref_delete_sync, cache_path, query.from_user.id, "cover_file_id"
@@ -290,7 +286,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:nickname":
+    if data == "params:nickname":
         user_data_of(context)["awaiting_custom_nickname"] = True
         user_data_of(context).pop("awaiting_custom_cover", None)
         await answer_callback_silently(query)
@@ -301,7 +297,7 @@ async def parameter_callback(
         )
         return None
 
-    if data == "main_menu:parameter_config:nickname_reset":
+    if data == "params:nickname_reset":
         user_data_of(context).pop("awaiting_custom_nickname", None)
         await asyncio.to_thread(
             ui_pref_delete_sync, cache_path, query.from_user.id, "nickname"

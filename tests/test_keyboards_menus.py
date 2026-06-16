@@ -59,18 +59,18 @@ class MenusTest(unittest.TestCase):
             ["main_menu", "close_message"],
         )
         self.assertEqual(
-            [button.callback_data for button in back_close_row("main_menu:ip_monitor")],
-            ["main_menu:ip_monitor", "close_message"],
+            [button.callback_data for button in back_close_row("ip_monitor")],
+            ["ip_monitor", "close_message"],
         )
 
     def test_main_menu_admin_routes_are_stable(self) -> None:
         callbacks = callback_data(main_menu_keyboard(is_admin=True))
         self.assertIn("main_menu:system_check", callbacks)
-        self.assertIn("main_menu:notifications", callbacks)
+        self.assertIn("notify", callbacks)
         self.assertIn("main_menu:traffic_management", callbacks)
-        self.assertIn("main_menu:ip_monitor", callbacks)
+        self.assertIn("ip_monitor", callbacks)
         self.assertIn("main_menu:op_logs", callbacks)
-        self.assertIn("main_menu:auth", callbacks)
+        self.assertIn("auth", callbacks)
         self.assertIn("close_message", callbacks)
 
     def test_menu_keyboards_return_markup_with_expected_callbacks(self) -> None:
@@ -95,51 +95,51 @@ class MenusTest(unittest.TestCase):
             (
                 ip_monitor_keyboard(),
                 {
-                    "main_menu:ip_monitor:period",
+                    "ip_monitor:period",
                     "alert_menu:ip",
-                    "main_menu:ip_monitor:ignore",
+                    "ip_monitor:ignore",
                 },
             ),
             (
                 ip_ignore_menu_keyboard(),
                 {
-                    "main_menu:ip_monitor:ignore:area:0",
-                    "main_menu:ip_monitor:ignored_rules:0",
+                    "ip_monitor:ignore:area:0",
+                    "ip_monitor:ignored_rules:0",
                 },
             ),
             (
                 parameter_config_keyboard(),
                 {
-                    "main_menu:parameter_config:cover",
-                    "main_menu:parameter_config:nickname",
-                    "main_menu:parameter_config:cache_retention",
-                    "main_menu:parameter_config:speedtest_jump",
+                    "params:cover",
+                    "params:nickname",
+                    "params:cache_retention",
+                    "params:speedtest_jump",
                 },
             ),
             (
                 debug_tools_keyboard(is_admin=True),
-                {"main_menu:debug:reset_cache", "main_menu:debug:reset_user_ip"},
+                {"debug:reset_cache", "debug:reset_user_ip"},
             ),
             (
                 reset_cache_keyboard(),
                 {
-                    "main_menu:debug:reset_cache_now",
-                    "main_menu:debug:reset_cache_floor",
+                    "debug:reset_cache_now",
+                    "debug:reset_cache_floor",
                 },
             ),
             (
                 reset_cache_confirm_keyboard(),
-                {"main_menu:debug:reset_cache_now_confirm"},
+                {"debug:reset_cache_now_confirm"},
             ),
             (
                 reset_user_ip_multi_confirm_keyboard([1, 2]),
                 {
-                    "main_menu:debug:reset_user_ip_multi_confirm",
-                    "main_menu:debug:reset_user_ip_page:0",
+                    "debug:reset_user_ip_multi_confirm",
+                    "debug:reset_user_ip_page:0",
                 },
             ),
-            (cover_config_keyboard(), {"main_menu:parameter_config:cover_reset"}),
-            (nickname_config_keyboard(), {"main_menu:parameter_config:nickname_reset"}),
+            (cover_config_keyboard(), {"params:cover_reset"}),
+            (nickname_config_keyboard(), {"params:nickname_reset"}),
         ]
         for markup, expected_callbacks in cases:
             with self.subTest(expected_callbacks=expected_callbacks):
@@ -196,7 +196,7 @@ class KeyboardsTest(unittest.TestCase):
             [
                 "alert_global:ip",
                 "alert_users:ip:0",
-                "main_menu:ip_monitor",
+                "ip_monitor",
                 "close_message",
             ],
         )
@@ -225,7 +225,7 @@ class KeyboardsTest(unittest.TestCase):
         ip_callbacks = callback_data(ip_detail_list_keyboard("ip_24h", users, page=1))
         self.assertIn("ip_active_user_detail:ip_24h:6", ip_callbacks)
         self.assertIn("ip_detail_list:ip_24h:0", ip_callbacks)
-        self.assertIn("main_menu:ip_monitor:period", ip_callbacks)
+        self.assertIn("ip_monitor:period", ip_callbacks)
 
         alert_callbacks = callback_data(
             alert_user_list_keyboard(
@@ -244,7 +244,7 @@ class KeyboardsTest(unittest.TestCase):
                 "active_users:7d",
                 "active_users:30d",
                 "ip_custom:start",
-                "main_menu:ip_monitor",
+                "ip_monitor",
                 "close_message",
             ],
         )
@@ -290,8 +290,8 @@ class KeyboardsTest(unittest.TestCase):
         self.assertEqual(
             callback_data(cache_retention_confirm_keyboard("all")),
             [
-                "main_menu:parameter_config:cache_retention_confirm:all",
-                "main_menu:parameter_config:cache_retention",
+                "params:cache_retention_confirm:all",
+                "params:cache_retention",
                 "close_message",
             ],
         )

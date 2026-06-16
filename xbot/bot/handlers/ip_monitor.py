@@ -45,9 +45,9 @@ async def ip_monitor_callback(
     show_callback_page,
     open_dashboard_card,
 ) -> bool | None:
-    if not (data.startswith("main_menu:ip_monitor") or data == "main_menu:noop"):
+    if not (data.startswith("ip_monitor") or data == "main_menu:noop"):
         return False
-    if data == "main_menu:ip_monitor":
+    if data == "ip_monitor":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -193,9 +193,7 @@ async def ip_monitor_callback(
         await show_callback_page(
             query,
             "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
-            InlineKeyboardMarkup(
-                [back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控")]
-            ),
+            InlineKeyboardMarkup([back_close_row("ip_monitor", "⬅️ 返回 IP 监控")]),
             parse_mode="HTML",
         )
         return None
@@ -275,9 +273,7 @@ async def handle_ip_detail_callback(
             await show_callback_page(
                 query,
                 "✅ <b>异地登录恢复</b>\n────────────\n当前用户已不再满足异地登录告警条件。",
-                InlineKeyboardMarkup(
-                    [back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控")]
-                ),
+                InlineKeyboardMarkup([back_close_row("ip_monitor", "⬅️ 返回 IP 监控")]),
                 parse_mode="HTML",
                 auto_delete=False,
             )

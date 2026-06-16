@@ -105,9 +105,7 @@ async def handle_active_users_callback(
         await show_callback_page(
             query,
             "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
-            InlineKeyboardMarkup(
-                [back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控")]
-            ),
+            InlineKeyboardMarkup([back_close_row("ip_monitor", "⬅️ 返回 IP 监控")]),
             parse_mode="HTML",
         )
         return None
@@ -398,7 +396,7 @@ async def handle_traffic_daily_callback(
                                 callback_data="main_menu:system_check",
                             )
                         ],
-                        back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"),
+                        back_close_row("debug:tools", "⬅️ 返回调试功能"),
                     ]
                 ),
             )

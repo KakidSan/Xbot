@@ -16,31 +16,25 @@ def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton("🩺 健康检查", callback_data="main_menu:system_check"),
-            InlineKeyboardButton(
-                "💬 通知推送", callback_data="main_menu:notifications"
-            ),
+            InlineKeyboardButton("💬 通知推送", callback_data="notify"),
         ],
         [
             InlineKeyboardButton(
                 "🌊 流量统计", callback_data="main_menu:traffic_management"
             ),
-            InlineKeyboardButton("🌐 IP 监控", callback_data="main_menu:ip_monitor"),
+            InlineKeyboardButton("🌐 IP 监控", callback_data="ip_monitor"),
         ],
         [InlineKeyboardButton("💡 链接提取", callback_data="main_menu:node_links")],
         [
-            InlineKeyboardButton(
-                "🎨 个人设置", callback_data="main_menu:parameter_config"
-            ),
-            InlineKeyboardButton("🧪 调试功能", callback_data="main_menu:debug_tools"),
+            InlineKeyboardButton("🎨 个人设置", callback_data="params"),
+            InlineKeyboardButton("🧪 调试功能", callback_data="debug:tools"),
         ],
     ]
     if is_admin:
         rows.append(
             [InlineKeyboardButton("📜 操作日志", callback_data="main_menu:op_logs")]
         )
-        rows.append(
-            [InlineKeyboardButton("🔑 授权管理", callback_data="main_menu:auth")]
-        )
+        rows.append([InlineKeyboardButton("🔑 授权管理", callback_data="auth")])
     rows.append([InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
     return InlineKeyboardMarkup(rows)
 
@@ -97,17 +91,9 @@ def traffic_management_keyboard() -> InlineKeyboardMarkup:
 def ip_monitor_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    "📊 周期统计", callback_data="main_menu:ip_monitor:period"
-                )
-            ],
+            [InlineKeyboardButton("📊 周期统计", callback_data="ip_monitor:period")],
             [InlineKeyboardButton("🚨 异地登录", callback_data="alert_menu:ip")],
-            [
-                InlineKeyboardButton(
-                    "🚧 忽略列表", callback_data="main_menu:ip_monitor:ignore"
-                )
-            ],
+            [InlineKeyboardButton("🚧 忽略列表", callback_data="ip_monitor:ignore")],
             back_close_row(),
         ]
     )
@@ -116,27 +102,15 @@ def ip_monitor_keyboard() -> InlineKeyboardMarkup:
 def ip_ignore_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("📍 地区", callback_data="ip_monitor:ignore:area:0")],
+            [InlineKeyboardButton("🏷 ASN", callback_data="ip_monitor:ignore:asn:0")],
+            [InlineKeyboardButton("🌐 IP", callback_data="ip_monitor:ignore:cidr:0")],
             [
                 InlineKeyboardButton(
-                    "📍 地区", callback_data="main_menu:ip_monitor:ignore:area:0"
+                    "📎 当前忽略", callback_data="ip_monitor:ignored_rules:0"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    "🏷 ASN", callback_data="main_menu:ip_monitor:ignore:asn:0"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🌐 IP", callback_data="main_menu:ip_monitor:ignore:cidr:0"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📎 当前忽略", callback_data="main_menu:ip_monitor:ignored_rules:0"
-                )
-            ],
-            back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"),
+            back_close_row("ip_monitor", "⬅️ 返回 IP 监控"),
         ]
     )
 
@@ -144,26 +118,18 @@ def ip_ignore_menu_keyboard() -> InlineKeyboardMarkup:
 def parameter_config_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    "🖼 自定题图", callback_data="main_menu:parameter_config:cover"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🏷 自定昵称", callback_data="main_menu:parameter_config:nickname"
-                )
-            ],
+            [InlineKeyboardButton("🖼 自定题图", callback_data="params:cover")],
+            [InlineKeyboardButton("🏷 自定昵称", callback_data="params:nickname")],
             [
                 InlineKeyboardButton(
                     "🤖 测试工具",
-                    callback_data="main_menu:parameter_config:speedtest_jump",
+                    callback_data="params:speedtest_jump",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "🗄 缓存保留时间",
-                    callback_data="main_menu:parameter_config:cache_retention",
+                    callback_data="params:cache_retention",
                 )
             ],
             back_close_row(),
@@ -175,16 +141,12 @@ def debug_tools_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if is_admin:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    "🧹 重置缓存", callback_data="main_menu:debug:reset_cache"
-                )
-            ]
+            [InlineKeyboardButton("🧹 重置缓存", callback_data="debug:reset_cache")]
         )
     rows.append(
         [
             InlineKeyboardButton(
-                "👤 重置特定用户 IP 记录", callback_data="main_menu:debug:reset_user_ip"
+                "👤 重置特定用户 IP 记录", callback_data="debug:reset_user_ip"
             )
         ]
     )
@@ -195,17 +157,13 @@ def debug_tools_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
 def reset_cache_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("🗑 全部重置", callback_data="debug:reset_cache_now")],
             [
                 InlineKeyboardButton(
-                    "🗑 全部重置", callback_data="main_menu:debug:reset_cache_now"
+                    "⚙️ 调整起始点", callback_data="debug:reset_cache_floor"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    "⚙️ 调整起始点", callback_data="main_menu:debug:reset_cache_floor"
-                )
-            ],
-            back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"),
+            back_close_row("debug:tools", "⬅️ 返回调试功能"),
         ]
     )
 
@@ -216,10 +174,10 @@ def reset_cache_confirm_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     "✅ 确认全部重置",
-                    callback_data="main_menu:debug:reset_cache_now_confirm",
+                    callback_data="debug:reset_cache_now_confirm",
                 )
             ],
-            back_close_row("main_menu:debug:reset_cache", "❎ 取消"),
+            back_close_row("debug:reset_cache", "❎ 取消"),
         ]
     )
 
@@ -230,12 +188,12 @@ def reset_user_ip_multi_confirm_keyboard(user_ids: list[int]) -> InlineKeyboardM
             [
                 InlineKeyboardButton(
                     "✅ 确认清理所选用户",
-                    callback_data="main_menu:debug:reset_user_ip_multi_confirm",
+                    callback_data="debug:reset_user_ip_multi_confirm",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "⬅️ 返回选择", callback_data="main_menu:debug:reset_user_ip_page:0"
+                    "⬅️ 返回选择", callback_data="debug:reset_user_ip_page:0"
                 ),
                 InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
             ],
@@ -249,10 +207,10 @@ def cover_config_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     "♻️ 重置为 Bot 头像",
-                    callback_data="main_menu:parameter_config:cover_reset",
+                    callback_data="params:cover_reset",
                 )
             ],
-            back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
+            back_close_row("params", "⬅️ 返回个人设置"),
         ]
     )
 
@@ -263,9 +221,9 @@ def nickname_config_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     "♻️ 重置为 Telegram 名称",
-                    callback_data="main_menu:parameter_config:nickname_reset",
+                    callback_data="params:nickname_reset",
                 )
             ],
-            back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
+            back_close_row("params", "⬅️ 返回个人设置"),
         ]
     )

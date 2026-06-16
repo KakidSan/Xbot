@@ -47,9 +47,9 @@ async def debug_callback(
     traffic_custom_state,
     traffic_custom_prompt_text,
 ) -> bool | None:
-    if not data.startswith("main_menu:debug"):
+    if not data.startswith("debug"):
         return False
-    if data == "main_menu:debug_tools":
+    if data == "debug:tools":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -58,12 +58,12 @@ async def debug_callback(
         )
         return None
 
-    if data.startswith("main_menu:debug:reset_cache"):
+    if data.startswith("debug:reset_cache"):
         if not is_admin_user_id(query.from_user.id, cfg):
             await query.answer("只有管理员可以使用重置缓存", show_alert=True)
             return None
 
-    if data == "main_menu:debug:reset_cache":
+    if data == "debug:reset_cache":
         user_data_of(context).pop("debug_reset_cache_mode", None)
         await answer_callback_silently(query)
         await show_callback_page(
@@ -73,7 +73,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_cache_now":
+    if data == "debug:reset_cache_now":
         user_data_of(context)["debug_reset_cache_mode"] = "now"
         await answer_callback_silently(query)
         await show_callback_page(
@@ -83,7 +83,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_cache_now_confirm":
+    if data == "debug:reset_cache_now_confirm":
         mode = user_data_of(context).pop("debug_reset_cache_mode", None)
         if mode != "now":
             await query.answer("请先选择重置方式", show_alert=True)
@@ -122,7 +122,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_cache_floor":
+    if data == "debug:reset_cache_floor":
         state = traffic_custom_state(context)
         state.clear()
         state.update({"mode": "floor", "phase": "floor", "step": "year", "debug": True})
@@ -134,7 +134,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_user_ip":
+    if data == "debug:reset_user_ip":
         user_data_of(context)["reset_user_ip_selected"] = set()
         await asyncio.to_thread(upsert_all_cache_users, cache_path, cfg.mysql)
         users = await asyncio.to_thread(list_all_cached_user_buttons_sync, cache_path)
@@ -146,9 +146,7 @@ async def debug_callback(
         )
         return None
 
-    reset_user_ip_page_match = re.fullmatch(
-        r"main_menu:debug:reset_user_ip_page:(\d+)", data
-    )
+    reset_user_ip_page_match = re.fullmatch(r"debug:reset_user_ip_page:(\d+)", data)
     if reset_user_ip_page_match:
         page = int(reset_user_ip_page_match.group(1))
         await asyncio.to_thread(upsert_all_cache_users, cache_path, cfg.mysql)
@@ -166,7 +164,7 @@ async def debug_callback(
         return None
 
     reset_user_ip_toggle_match = re.fullmatch(
-        r"main_menu:debug:reset_user_ip_toggle:(\d+):(\d+)", data
+        r"debug:reset_user_ip_toggle:(\d+):(\d+)", data
     )
     if reset_user_ip_toggle_match:
         page = int(reset_user_ip_toggle_match.group(1))
@@ -189,7 +187,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_user_ip_done":
+    if data == "debug:reset_user_ip_done":
         selected = user_data_of(context).get("reset_user_ip_selected") or set()
         if not isinstance(selected, set):
             selected = set(selected or [])
@@ -219,7 +217,7 @@ async def debug_callback(
         )
         return None
 
-    if data == "main_menu:debug:reset_user_ip_multi_confirm":
+    if data == "debug:reset_user_ip_multi_confirm":
         selected = user_data_of(context).get("reset_user_ip_selected") or set()
         if not isinstance(selected, set):
             selected = set(selected or [])

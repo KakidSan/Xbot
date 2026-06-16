@@ -118,9 +118,7 @@ async def handle_fallback_message(
                 update,
                 context,
                 "🔐 <b>添加授权</b>\n────────────\n请发送 Telegram 用户 ID、@用户名 或 t.me 链接；或发送 /start 取消。",
-                InlineKeyboardMarkup(
-                    [back_close_row("main_menu:auth", "⬅️ 返回授权管理")]
-                ),
+                InlineKeyboardMarkup([back_close_row("auth", "⬅️ 返回授权管理")]),
             )
             return
         target_uid: int | None = (
@@ -146,7 +144,7 @@ async def handle_fallback_message(
                         context,
                         "🔐 <b>添加授权</b>\n────────────\n无法通过该用户名获取 Telegram 用户 ID；请确认 Bot 能访问该账号，或改用数字 ID。",
                         InlineKeyboardMarkup(
-                            [back_close_row("main_menu:auth", "⬅️ 返回授权管理")]
+                            [back_close_row("auth", "⬅️ 返回授权管理")]
                         ),
                     )
                     return
@@ -239,7 +237,7 @@ async def handle_fallback_message(
                 InlineKeyboardMarkup(
                     [
                         back_close_row(
-                            "main_menu:parameter_config:speedtest_jump",
+                            "params:speedtest_jump",
                             "⬅️ 返回测试工具",
                         )
                     ]
@@ -278,7 +276,7 @@ async def handle_fallback_message(
                     InlineKeyboardMarkup(
                         [
                             back_close_row(
-                                "main_menu:parameter_config:speedtest_jump",
+                                "params:speedtest_jump",
                                 "⬅️ 返回测试工具",
                             )
                         ]
@@ -300,7 +298,7 @@ async def handle_fallback_message(
                 InlineKeyboardMarkup(
                     [
                         back_close_row(
-                            "main_menu:parameter_config:speedtest_jump",
+                            "params:speedtest_jump",
                             "⬅️ 返回测试工具",
                         )
                     ]
@@ -332,11 +330,7 @@ async def handle_fallback_message(
             context,
             f"✅ <b>已添加测试工具</b>\n────────────\n{html.escape(nickname)} (<code>{html.escape(id_label)}</code>)",
             InlineKeyboardMarkup(
-                [
-                    back_close_row(
-                        "main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具"
-                    )
-                ]
+                [back_close_row("params:speedtest_jump", "⬅️ 返回测试工具")]
             ),
         )
         return None

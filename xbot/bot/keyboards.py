@@ -137,7 +137,7 @@ def ip_monitor_period_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("近 30 天", callback_data="active_users:30d"),
             ],
             [InlineKeyboardButton("自选区间", callback_data="ip_custom:start")],
-            back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"),
+            back_close_row("ip_monitor", "⬅️ 返回 IP 监控"),
         ]
     )
 
@@ -160,7 +160,7 @@ def ip_monitor_period_result_keyboard(
         [
             switch_row,
             [InlineKeyboardButton("自选区间", callback_data="ip_custom:start")],
-            back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"),
+            back_close_row("ip_monitor", "⬅️ 返回 IP 监控"),
         ]
     )
 
@@ -180,11 +180,11 @@ def cache_retention_keyboard(
             [
                 InlineKeyboardButton(
                     f"{mark}{label}",
-                    callback_data=f"main_menu:parameter_config:cache_retention_select:{option_key}",
+                    callback_data=f"params:cache_retention_select:{option_key}",
                 )
             ]
         )
-    rows.append(back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"))
+    rows.append(back_close_row("params", "⬅️ 返回个人设置"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -194,13 +194,13 @@ def cache_retention_confirm_keyboard(option_key: str) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     "✅ 确认并清理",
-                    callback_data=f"main_menu:parameter_config:cache_retention_confirm:{option_key}",
+                    callback_data=f"params:cache_retention_confirm:{option_key}",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "⬅️ 返回选择",
-                    callback_data="main_menu:parameter_config:cache_retention",
+                    callback_data="params:cache_retention",
                 ),
                 InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
             ],
@@ -226,44 +226,24 @@ def notification_push_keyboard(
         return f"{'🔔' if status.get(kind) else '🔕'} {NOTIFICATION_KINDS[kind]}"
 
     rows = [
-        [
-            InlineKeyboardButton(
-                label("collector"), callback_data="main_menu:notifications:collector"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                label("daily"), callback_data="main_menu:notifications:daily"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                label("weekly"), callback_data="main_menu:notifications:weekly"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                label("monthly"), callback_data="main_menu:notifications:monthly"
-            )
-        ],
+        [InlineKeyboardButton(label("collector"), callback_data="notify:collector")],
+        [InlineKeyboardButton(label("daily"), callback_data="notify:daily")],
+        [InlineKeyboardButton(label("weekly"), callback_data="notify:weekly")],
+        [InlineKeyboardButton(label("monthly"), callback_data="notify:monthly")],
         [
             InlineKeyboardButton(
                 label("traffic_alert"),
-                callback_data="main_menu:notifications:traffic_alert",
+                callback_data="notify:traffic_alert",
             )
         ],
-        [
-            InlineKeyboardButton(
-                label("ip_alert"), callback_data="main_menu:notifications:ip_alert"
-            )
-        ],
+        [InlineKeyboardButton(label("ip_alert"), callback_data="notify:ip_alert")],
     ]
     if is_admin:
         rows.append(
             [
                 InlineKeyboardButton(
                     label("version_update"),
-                    callback_data="main_menu:notifications:version_update",
+                    callback_data="notify:version_update",
                 )
             ]
         )
@@ -273,9 +253,7 @@ def notification_push_keyboard(
 
 def alert_menu_keyboard(alert_type: str) -> InlineKeyboardMarkup:
     back_target = (
-        "main_menu:traffic_management"
-        if alert_type == "traffic"
-        else "main_menu:ip_monitor"
+        "main_menu:traffic_management" if alert_type == "traffic" else "ip_monitor"
     )
     back_text = "⬅️ 返回流量统计" if alert_type == "traffic" else "⬅️ 返回 IP 监控"
     return InlineKeyboardMarkup(
@@ -577,7 +555,7 @@ def active_users_keyboard(
             ]
         )
     if not selected_period:
-        rows.append(back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控"))
+        rows.append(back_close_row("ip_monitor", "⬅️ 返回 IP 监控"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -617,9 +595,7 @@ def ip_detail_list_keyboard(
         rows.append(nav_row)
     rows.append(
         [
-            InlineKeyboardButton(
-                "💫 切换查询周期", callback_data="main_menu:ip_monitor:period"
-            ),
+            InlineKeyboardButton("💫 切换查询周期", callback_data="ip_monitor:period"),
             InlineKeyboardButton("❌ 关闭", callback_data="close_message"),
         ]
     )
@@ -843,9 +819,9 @@ def traffic_custom_year_keyboard(
             [InlineKeyboardButton("⏰ 至今", callback_data="traffic_custom:now")]
         )
     if mode == "ip_custom":
-        back_callback = "main_menu:ip_monitor:period"
+        back_callback = "ip_monitor:period"
     elif mode == "floor":
-        back_callback = "main_menu:debug:reset_cache"
+        back_callback = "debug:reset_cache"
     else:
         back_callback = "traffic_menu"
     rows.append(
@@ -887,9 +863,7 @@ def traffic_custom_month_keyboard(
             [InlineKeyboardButton("⏰ 至今", callback_data="traffic_custom:now")]
         )
     if traffic_custom_single_year(cache_path):
-        back_callback = (
-            "main_menu:ip_monitor:period" if mode == "ip_custom" else "traffic_menu"
-        )
+        back_callback = "ip_monitor:period" if mode == "ip_custom" else "traffic_menu"
         rows.append(
             [
                 InlineKeyboardButton("⬅️ 返回", callback_data=back_callback),
@@ -1061,7 +1035,7 @@ def ignored_rules_keyboard(
             [
                 InlineKeyboardButton(
                     label[:64],
-                    callback_data=f"main_menu:ip_monitor:ignored_rule_toggle:{page}:{token}",
+                    callback_data=f"ip_monitor:ignored_rule_toggle:{page}:{token}",
                 )
             ]
         )
@@ -1071,7 +1045,7 @@ def ignored_rules_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "⬅️ 上一页",
-                    callback_data=f"main_menu:ip_monitor:ignored_rules:{page - 1}",
+                    callback_data=f"ip_monitor:ignored_rules:{page - 1}",
                 )
             )
         nav_row.append(
@@ -1083,7 +1057,7 @@ def ignored_rules_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "下一页 ➡️",
-                    callback_data=f"main_menu:ip_monitor:ignored_rules:{page + 1}",
+                    callback_data=f"ip_monitor:ignored_rules:{page + 1}",
                 )
             )
         rows.append(nav_row)
@@ -1091,7 +1065,7 @@ def ignored_rules_keyboard(
         rows.append(
             [InlineKeyboardButton("当前暂无忽略内容", callback_data="main_menu:noop")]
         )
-    rows.append(back_close_row("main_menu:ip_monitor:ignore", "⬅️ 返回忽略列表"))
+    rows.append(back_close_row("ip_monitor:ignore", "⬅️ 返回忽略列表"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -1122,7 +1096,7 @@ def ip_ignore_list_keyboard(
             [
                 InlineKeyboardButton(
                     label[:64],
-                    callback_data=f"main_menu:ip_monitor:ignore_toggle:{dimension}:{page}:{token}",
+                    callback_data=f"ip_monitor:ignore_toggle:{dimension}:{page}:{token}",
                 )
             ]
         )
@@ -1132,7 +1106,7 @@ def ip_ignore_list_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "⬅️ 上一页",
-                    callback_data=f"main_menu:ip_monitor:ignore:{dimension}:{page - 1}",
+                    callback_data=f"ip_monitor:ignore:{dimension}:{page - 1}",
                 )
             )
         nav_row.append(
@@ -1142,7 +1116,7 @@ def ip_ignore_list_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "下一页 ➡️",
-                    callback_data=f"main_menu:ip_monitor:ignore:{dimension}:{page + 1}",
+                    callback_data=f"ip_monitor:ignore:{dimension}:{page + 1}",
                 )
             )
         rows.append(nav_row)
@@ -1150,7 +1124,7 @@ def ip_ignore_list_keyboard(
         rows.append(
             [InlineKeyboardButton("暂无已采集信息", callback_data="main_menu:noop")]
         )
-    rows.append(back_close_row("main_menu:ip_monitor:ignore", "⬅️ 返回忽略列表"))
+    rows.append(back_close_row("ip_monitor:ignore", "⬅️ 返回忽略列表"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -1355,7 +1329,7 @@ def reset_user_ip_select_keyboard(
             [
                 InlineKeyboardButton(
                     f"{prefix}{label}",
-                    callback_data=f"main_menu:debug:reset_user_ip_toggle:{page}:{user_id_value}",
+                    callback_data=f"debug:reset_user_ip_toggle:{page}:{user_id_value}",
                 )
             ]
         )
@@ -1365,7 +1339,7 @@ def reset_user_ip_select_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "⬅️ 上一页",
-                    callback_data=f"main_menu:debug:reset_user_ip_page:{page - 1}",
+                    callback_data=f"debug:reset_user_ip_page:{page - 1}",
                 )
             )
         nav_row.append(
@@ -1375,7 +1349,7 @@ def reset_user_ip_select_keyboard(
             nav_row.append(
                 InlineKeyboardButton(
                     "下一页 ➡️",
-                    callback_data=f"main_menu:debug:reset_user_ip_page:{page + 1}",
+                    callback_data=f"debug:reset_user_ip_page:{page + 1}",
                 )
             )
         rows.append(nav_row)
@@ -1383,9 +1357,9 @@ def reset_user_ip_select_keyboard(
         [
             InlineKeyboardButton(
                 f"✅ 完成选择 ({len(selected)})",
-                callback_data="main_menu:debug:reset_user_ip_done",
+                callback_data="debug:reset_user_ip_done",
             )
         ]
     )
-    rows.append(back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"))
+    rows.append(back_close_row("debug:tools", "⬅️ 返回调试功能"))
     return InlineKeyboardMarkup(rows)

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from ...common import BadRequest, ContextTypes, Path, Update, asyncio, html, is_admin_user_id, re, timedelta
 from ...config import AppConfig
-from ...db.cache import initialization_acknowledge_sync, notification_ip_alert_mode_label, notification_toggle_sync, ui_pref_get_sync
+from ...db.cache import initialization_acknowledge_sync, notification_toggle_sync, ui_pref_get_sync
 from ..context import BotContext
-from ..formatters import bot_health_overview_text_sync
+from ..formatters import bot_health_overview_text_sync, notification_ip_alert_mode_label
 from ..keyboards import active_users_keyboard, notification_push_keyboard
 from ..menus import clear_history_confirm_keyboard, empty_section_keyboard, health_check_keyboard, main_menu_keyboard, traffic_management_keyboard
 from .auth import auth_callback

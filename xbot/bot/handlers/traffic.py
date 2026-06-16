@@ -44,7 +44,7 @@ from ..keyboards import (
 )
 from ..menus import back_close_row
 from ..operation_logs import log_operation_from_query as log_operation_from_query_with_cache
-from ..traffic import make_range_kind
+from ...db.cache import make_range_kind
 from .legacy import is_allowed, is_bot_self_update
 
 

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from ...common import ContextTypes, Update, asyncio, re
+from ...common import is_admin_user_id
 from ...config import AppConfig
+from ...db.cache import operation_log_mark_read_sync
 from ..context import BotContext
 from ..operation_logs import (
     operation_log_detail_keyboard,
     operation_log_detail_text_sync,
-    operation_log_mark_read_sync,
     operation_log_summary_text_sync,
     operation_logs_menu_keyboard,
     operation_logs_summary_keyboard,
 )
-from ...common import is_admin_user_id
 
 
 async def operation_logs_callback(

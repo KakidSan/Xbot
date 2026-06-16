@@ -28,5 +28,16 @@ jobs:
       - name: Compile
         run: python -m compileall -q xbot xbot.py tests
 
+      - name: Import bot package
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import importlib
+          import pkgutil
+          import xbot.bot
+
+          for _, name, _ in pkgutil.walk_packages(xbot.bot.__path__, "xbot.bot."):
+              importlib.import_module(name)
+          PY
+
       - name: Run unit tests
         run: PYTHONPATH=. python -m unittest discover -q -s tests

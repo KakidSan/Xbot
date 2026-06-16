@@ -14,7 +14,7 @@ from ..authorization import (
 from ..context import BotContext
 from ..menus import back_close_row
 from ..operation_details import auth_change_detail
-from ..operation_logs import log_operation_from_query_with_cache
+from ..operation_logs import log_operation_from_query as log_operation_from_query_with_cache
 
 
 async def auth_callback(

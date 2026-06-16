@@ -3,7 +3,6 @@ from __future__ import annotations
 from ...common import (
     BadRequest,
     ContextTypes,
-    NOTIFICATION_KINDS,
     Path,
     Message,
     Update,
@@ -18,12 +17,11 @@ from ...config import AppConfig
 from ...db.cache import (
     initialization_acknowledge_sync,
     list_user_ips_from_cache_sync,
-    notification_toggle_sync,
     ui_pref_get_sync,
 )
 from ..context import BotContext
-from ..formatters import bot_health_overview_text_sync, notification_ip_alert_mode_label
-from ..keyboards import active_users_keyboard, notification_push_keyboard
+from ..formatters import bot_health_overview_text_sync
+from ..keyboards import active_users_keyboard
 from ...node_monitor import (
     format_node_link_detail_sync,
     format_node_links_text_sync,
@@ -38,13 +36,9 @@ from ..menus import (
     main_menu_keyboard,
     traffic_management_keyboard,
 )
-from .auth import auth_callback
 from ..callback_data import normalize_main_menu_callback
-from .debug import debug_callback
-from .ip_monitor import ip_monitor_callback
 from ..permissions import is_allowed, is_bot_self_update
 from .operation_logs import operation_logs_callback
-from .parameters import parameter_callback
 
 
 async def handle_main_menu_callback(
@@ -94,7 +88,6 @@ async def handle_main_menu_callback(
 
     sections = {
         "main_menu:status_notice": "💬 通知推送",
-        "main_menu:debug_tools": "🧪 调试功能",
     }
 
     if data == "main_menu":
@@ -127,22 +120,6 @@ async def handle_main_menu_callback(
             query=query,
             answer_callback_silently=answer_callback_silently,
             show_callback_page=show_callback_page,
-        )
-    ) is not False:
-        return None
-
-    if (
-        await auth_callback(
-            update,
-            context,
-            cfg=cfg,
-            bot_ctx=bot_ctx,
-            cache_path=cache_path,
-            data=data,
-            query=query,
-            answer_callback_silently=answer_callback_silently,
-            show_callback_page=show_callback_page,
-            resolve_telegram_user_label=resolve_telegram_user_label,
         )
     ) is not False:
         return None
@@ -246,57 +223,6 @@ async def handle_main_menu_callback(
         await show_callback_page(query, text, keyboard, parse_mode="HTML")
         return None
 
-    if data in {"main_menu:notifications", "main_menu:status_notice"}:
-        await answer_callback_silently(query)
-        chat_id = (
-            str(query.message.chat_id)
-            if query.message and hasattr(query.message, "chat_id")
-            else ""
-        )
-        await show_callback_page(
-            query,
-            "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-            notification_push_keyboard(
-                bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)
-            ),
-            parse_mode="HTML",
-        )
-        return None
-
-    notification_match = re.fullmatch(
-        r"main_menu:notifications:(daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update)",
-        data,
-    )
-    if notification_match:
-        kind = notification_match.group(1)
-        if kind == "version_update" and not is_admin_user_id(query.from_user.id, cfg):
-            await query.answer("只有管理员可以设置版本更新推送", show_alert=True)
-            return
-        chat_id = (
-            str(query.message.chat_id)
-            if query.message and hasattr(query.message, "chat_id")
-            else ""
-        )
-        result = await asyncio.to_thread(
-            notification_toggle_sync, cache_path, chat_id, kind
-        )
-        label = NOTIFICATION_KINDS[kind]
-        if kind == "ip_alert":
-            await query.answer(
-                f"异地登录已切换为{notification_ip_alert_mode_label(str(result))}通知"
-            )
-        else:
-            await query.answer(f"{label}已{'开启' if result else '关闭'}推送")
-        await show_callback_page(
-            query,
-            "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-            notification_push_keyboard(
-                bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)
-            ),
-            parse_mode="HTML",
-        )
-        return None
-
     if data == "main_menu:traffic_management":
         await answer_callback_silently(query)
         await show_callback_page(
@@ -315,56 +241,6 @@ async def handle_main_menu_callback(
     if data == "main_menu:traffic_nodes":
         await query.answer("正在统计节点用量，请稍候...")
         await send_or_jump_traffic_dashboard(query.message, "nodes_preset_24h")
-        return None
-
-    if (
-        await ip_monitor_callback(
-            update,
-            context,
-            cfg=cfg,
-            bot_ctx=bot_ctx,
-            cache_path=cache_path,
-            data=data,
-            query=query,
-            answer_callback_silently=answer_callback_silently,
-            show_callback_page=show_callback_page,
-            open_dashboard_card=open_dashboard_card,
-        )
-    ) is not False:
-        return None
-
-    if (
-        await parameter_callback(
-            update,
-            context,
-            cfg=cfg,
-            bot_ctx=bot_ctx,
-            cache_path=cache_path,
-            data=data,
-            query=query,
-            answer_callback_silently=answer_callback_silently,
-            show_callback_page=show_callback_page,
-            cache_retention_text_sync=cache_retention_text_sync,
-            cache_retention_preview_text=cache_retention_preview_text,
-        )
-    ) is not False:
-        return None
-
-    if (
-        await debug_callback(
-            update,
-            context,
-            cfg=cfg,
-            bot_ctx=bot_ctx,
-            cache_path=cache_path,
-            data=data,
-            query=query,
-            answer_callback_silently=answer_callback_silently,
-            show_callback_page=show_callback_page,
-            traffic_custom_state=traffic_custom_state,
-            traffic_custom_prompt_text=traffic_custom_prompt_text,
-        )
-    ) is not False:
         return None
 
     if data in sections:

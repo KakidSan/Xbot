@@ -20,6 +20,7 @@ from ...db.cache import (
     reset_local_cache_sync,
     upsert_all_cache_users,
 )
+from ..callback_data import normalize_main_menu_callback
 from ..context import BotContext, user_data_of
 from ..keyboards import reset_user_ip_select_keyboard, traffic_custom_year_keyboard
 from ..menus import (
@@ -31,6 +32,42 @@ from ..menus import (
 from ..operation_logs import (
     log_operation_from_query as log_operation_from_query_with_cache,
 )
+from ..permissions import is_allowed, is_bot_self_update
+
+
+async def handle_debug_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    bot_ctx: BotContext,
+    cache_path: Path,
+    answer_callback_silently,
+    show_callback_page,
+    traffic_custom_state,
+    traffic_custom_prompt_text,
+) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return None
+    if not is_allowed(update, cfg):
+        if is_bot_self_update(update, cfg):
+            return None
+        await query.answer("未授权，无法使用该功能", show_alert=True)
+        return None
+    await debug_callback(
+        update,
+        context,
+        cfg=cfg,
+        bot_ctx=bot_ctx,
+        cache_path=cache_path,
+        data=normalize_main_menu_callback(query.data or ""),
+        query=query,
+        answer_callback_silently=answer_callback_silently,
+        show_callback_page=show_callback_page,
+        traffic_custom_state=traffic_custom_state,
+        traffic_custom_prompt_text=traffic_custom_prompt_text,
+    )
 
 
 async def debug_callback(

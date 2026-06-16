@@ -41,7 +41,14 @@ from .handlers.commands import (
     handle_user_ip_query_command,
 )
 from .handlers.alerts import handle_alert_callback
-from .handlers.ip_monitor import handle_ip_detail_callback
+from .handlers.auth import handle_auth_callback
+from .handlers.debug import handle_debug_callback
+from .handlers.ip_monitor import (
+    handle_ip_detail_callback,
+    handle_ip_monitor_menu_callback,
+)
+from .handlers.notifications import handle_notifications_callback
+from .handlers.parameters import handle_parameters_callback
 from .handlers.text_input import handle_fallback_message
 from .handlers.main_menu import (
     handle_close_message_callback,
@@ -246,13 +253,29 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
     )
     app.add_handler(
         CallbackQueryHandler(
-            main_menu_handler,
+            partial(
+                handle_auth_callback,
+                cfg=cfg,
+                bot_ctx=bot_ctx,
+                cache_path=cache_path,
+                answer_callback_silently=answer_callback_silently,
+                show_callback_page=show_callback_page,
+                resolve_telegram_user_label=resolve_telegram_user_label,
+            ),
             pattern=MAIN_MENU_AUTH_PATTERN,
         )
     )
     app.add_handler(
         CallbackQueryHandler(
-            main_menu_handler,
+            partial(
+                handle_ip_monitor_menu_callback,
+                cfg=cfg,
+                bot_ctx=bot_ctx,
+                cache_path=cache_path,
+                answer_callback_silently=answer_callback_silently,
+                show_callback_page=show_callback_page,
+                open_dashboard_card=open_dashboard_card,
+            ),
             pattern=MAIN_MENU_IP_MONITOR_PATTERN,
         )
     )
@@ -267,19 +290,43 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
     )
     app.add_handler(
         CallbackQueryHandler(
-            main_menu_handler,
+            partial(
+                handle_parameters_callback,
+                cfg=cfg,
+                bot_ctx=bot_ctx,
+                cache_path=cache_path,
+                answer_callback_silently=answer_callback_silently,
+                show_callback_page=show_callback_page,
+                cache_retention_text_sync=cache_retention_text_sync,
+                cache_retention_preview_text=cache_retention_preview_text,
+            ),
             pattern=MAIN_MENU_PARAMETER_CONFIG_PATTERN,
         )
     )
     app.add_handler(
         CallbackQueryHandler(
-            main_menu_handler,
+            partial(
+                handle_notifications_callback,
+                cfg=cfg,
+                bot_ctx=bot_ctx,
+                answer_callback_silently=answer_callback_silently,
+                show_callback_page=show_callback_page,
+            ),
             pattern=MAIN_MENU_NOTIFICATIONS_PATTERN,
         )
     )
     app.add_handler(
         CallbackQueryHandler(
-            main_menu_handler,
+            partial(
+                handle_debug_callback,
+                cfg=cfg,
+                bot_ctx=bot_ctx,
+                cache_path=cache_path,
+                answer_callback_silently=answer_callback_silently,
+                show_callback_page=show_callback_page,
+                traffic_custom_state=runtime.traffic_custom_state,
+                traffic_custom_prompt_text=runtime.traffic_custom_prompt_text,
+            ),
             pattern=MAIN_MENU_DEBUG_PATTERN,
         )
     )

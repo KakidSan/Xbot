@@ -12,6 +12,7 @@ from ...common import (
 )
 from ...config import AppConfig
 from ...db.cache import update_telegram_roles_in_cache_sync
+from ..callback_data import normalize_main_menu_callback
 from ..authorization import (
     authorization_delete_confirm_keyboard as authorization_delete_confirm_keyboard_for_cfg,
     authorization_delete_keyboard as authorization_delete_keyboard_for_cfg,
@@ -26,6 +27,40 @@ from ..operation_details import auth_change_detail
 from ..operation_logs import (
     log_operation_from_query as log_operation_from_query_with_cache,
 )
+from ..permissions import is_allowed, is_bot_self_update
+
+
+async def handle_auth_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    bot_ctx: BotContext,
+    cache_path,
+    answer_callback_silently,
+    show_callback_page,
+    resolve_telegram_user_label,
+) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return None
+    if not is_allowed(update, cfg):
+        if is_bot_self_update(update, cfg):
+            return None
+        await query.answer("未授权，无法使用该功能", show_alert=True)
+        return None
+    await auth_callback(
+        update,
+        context,
+        cfg=cfg,
+        bot_ctx=bot_ctx,
+        cache_path=cache_path,
+        data=normalize_main_menu_callback(query.data or ""),
+        query=query,
+        answer_callback_silently=answer_callback_silently,
+        show_callback_page=show_callback_page,
+        resolve_telegram_user_label=resolve_telegram_user_label,
+    )
 
 
 async def auth_callback(
@@ -65,7 +100,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:add":
+    if data == "auth:add":
         user_data_of(context)["awaiting_auth_add_user_id"] = {
             "chat_id": query.message.chat_id,
             "message_id": query.message.message_id,
@@ -78,7 +113,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:roles":
+    if data == "auth:roles":
         if not is_super_admin:
             await query.answer("只有超级管理员可以设置普通管理员", show_alert=True)
             return None
@@ -95,7 +130,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    role_toggle_match = re.fullmatch(r"main_menu:auth:role_toggle:(\d+)", data)
+    role_toggle_match = re.fullmatch(r"auth:role_toggle:(\d+)", data)
     if role_toggle_match:
         if not is_super_admin:
             await query.answer("只有超级管理员可以设置普通管理员", show_alert=True)
@@ -133,7 +168,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:role_save":
+    if data == "auth:role_save":
         if not is_super_admin:
             await query.answer("只有超级管理员可以设置普通管理员", show_alert=True)
             return None
@@ -179,7 +214,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:delete":
+    if data == "auth:delete":
         user_data_of(context)["auth_delete_selected"] = set()
         await answer_callback_silently(query)
         delete_hint = (
@@ -196,7 +231,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    toggle_match = re.fullmatch(r"main_menu:auth:del_toggle:(\d+)", data)
+    toggle_match = re.fullmatch(r"auth:del_toggle:(\d+)", data)
     if toggle_match:
         target_uid = int(toggle_match.group(1))
         selected = user_data_of(context).get("auth_delete_selected") or set()
@@ -222,7 +257,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:del_done":
+    if data == "auth:del_done":
         selected = user_data_of(context).get("auth_delete_selected") or set()
         if not selected:
             await query.answer("请先选择要删除的用户", show_alert=True)
@@ -242,7 +277,7 @@ async def auth_callback(
             parse_mode="HTML",
         )
         return None
-    if data == "main_menu:auth:del_confirm":
+    if data == "auth:del_confirm":
         selected = user_data_of(context).get("auth_delete_selected") or set()
         selected_user_ids = {int(uid) for uid in selected}
         if not selected_user_ids:

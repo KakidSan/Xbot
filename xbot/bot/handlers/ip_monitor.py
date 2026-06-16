@@ -13,6 +13,7 @@ from ...db.cache import (
     parse_ip_kind,
 )
 from ...geo import ignored_rules_text_sync
+from ..callback_data import normalize_main_menu_callback
 from ..context import BotContext, user_data_of
 from ..formatters import format_ip_alert
 from ..keyboards import (
@@ -30,6 +31,39 @@ from ..operation_logs import (
     log_operation_from_query as log_operation_from_query_with_cache,
 )
 from ..permissions import is_allowed, is_bot_self_update
+
+
+async def handle_ip_monitor_menu_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    bot_ctx: BotContext,
+    cache_path: Path,
+    answer_callback_silently,
+    show_callback_page,
+    open_dashboard_card,
+) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return None
+    if not is_allowed(update, cfg):
+        if is_bot_self_update(update, cfg):
+            return None
+        await query.answer("未授权，无法使用该功能", show_alert=True)
+        return None
+    await ip_monitor_callback(
+        update,
+        context,
+        cfg=cfg,
+        bot_ctx=bot_ctx,
+        cache_path=cache_path,
+        data=normalize_main_menu_callback(query.data or ""),
+        query=query,
+        answer_callback_silently=answer_callback_silently,
+        show_callback_page=show_callback_page,
+        open_dashboard_card=open_dashboard_card,
+    )
 
 
 async def ip_monitor_callback(
@@ -57,12 +91,12 @@ async def ip_monitor_callback(
         )
         return None
 
-    if data == "main_menu:ip_monitor:period":
+    if data == "ip_monitor:period":
         await query.answer("正在生成查询，请稍候...")
         await open_dashboard_card(query, "ip_1h")
         return None
 
-    if data == "main_menu:ip_monitor:ignore":
+    if data == "ip_monitor:ignore":
         await answer_callback_silently(query)
         await show_callback_page(
             query,
@@ -72,9 +106,7 @@ async def ip_monitor_callback(
         )
         return None
 
-    ignored_rules_match = re.fullmatch(
-        r"main_menu:ip_monitor:ignored_rules:(\d+)", data
-    )
+    ignored_rules_match = re.fullmatch(r"ip_monitor:ignored_rules:(\d+)", data)
     if ignored_rules_match:
         page = int(ignored_rules_match.group(1))
         await answer_callback_silently(query)
@@ -87,7 +119,7 @@ async def ip_monitor_callback(
         return None
 
     ignored_rule_toggle_match = re.fullmatch(
-        r"main_menu:ip_monitor:ignored_rule_toggle:(\d+):([A-Za-z0-9]+)", data
+        r"ip_monitor:ignored_rule_toggle:(\d+):([A-Za-z0-9]+)", data
     )
     if ignored_rule_toggle_match:
         page = int(ignored_rule_toggle_match.group(1))
@@ -126,9 +158,7 @@ async def ip_monitor_callback(
         )
         return None
 
-    ignore_page_match = re.fullmatch(
-        r"main_menu:ip_monitor:ignore:(area|asn|cidr):(\d+)", data
-    )
+    ignore_page_match = re.fullmatch(r"ip_monitor:ignore:(area|asn|cidr):(\d+)", data)
     if ignore_page_match:
         dimension = ignore_page_match.group(1)
         page = int(ignore_page_match.group(2))
@@ -143,7 +173,7 @@ async def ip_monitor_callback(
         return None
 
     ignore_toggle_match = re.fullmatch(
-        r"main_menu:ip_monitor:ignore_toggle:(area|asn|cidr):(\d+):([A-Za-z0-9]+)", data
+        r"ip_monitor:ignore_toggle:(area|asn|cidr):(\d+):([A-Za-z0-9]+)", data
     )
     if ignore_toggle_match:
         dimension = ignore_toggle_match.group(1)
@@ -186,7 +216,7 @@ async def ip_monitor_callback(
         await answer_callback_silently(query)
         return None
 
-    if data == "main_menu:ip_monitor:user_query":
+    if data == "ip_monitor:user_query":
         user_data_of(context)["awaiting_user_ip_query_id"] = True
         user_data_of(context).pop("user_ip_query_period", None)
         await answer_callback_silently(query)

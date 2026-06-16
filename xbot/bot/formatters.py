@@ -457,5 +457,3 @@ def alert_summary_sync(cache_path: Path, alert_type: str) -> str:
 
 def notification_ip_alert_mode_label(mode: str) -> str:
     return {"off": "关闭", "basic": "基础", "advanced": "高级"}.get(mode, "基础")
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

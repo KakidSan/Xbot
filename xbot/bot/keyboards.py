@@ -694,5 +694,3 @@ def reset_user_ip_select_keyboard(users: list[tuple[int, str]], selected: set[in
     rows.append([InlineKeyboardButton(f"✅ 完成选择 ({len(selected)})", callback_data="main_menu:debug:reset_user_ip_done")])
     rows.append(back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"))
     return InlineKeyboardMarkup(rows)
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

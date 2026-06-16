@@ -147,5 +147,3 @@ def build_config_from_env() -> AppConfig:
         cache_retention_days=DEFAULT_CACHE_RETENTION_DAYS,
         ip_geo_queries_per_minute=DEFAULT_IP_GEO_QUERIES_PER_MINUTE,
     )
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

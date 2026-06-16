@@ -99,7 +99,6 @@ _INITIALIZED_CACHE_PATHS: set[Path] = set()
 
 # Export shared constants/imports, including private module-level state that was
 # formerly global in the single-file runtime.
-__all__ = [name for name in globals() if not name.startswith("__")]
 
 def _as_int_set(value: Any) -> set[int]:
     if value is None:
@@ -137,7 +136,6 @@ def compact_connection_error_lines(result: str) -> list[str]:
     return lines
 
 # Keep this at the bottom so star imports include shared private helpers too.
-__all__ = [name for name in globals() if not name.startswith("__")]
 
 def beijing_now() -> datetime:
     return datetime.now(BEIJING_TZ)
@@ -214,7 +212,6 @@ def parse_ip_kind(kind: str) -> tuple[str, int | None, int | None] | None:
     return None
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
 
 # Shared authorization helpers used outside Telegram handler modules.
 def is_super_admin_user_id(uid: int | None, cfg: Any) -> bool:
@@ -226,4 +223,3 @@ def is_admin_user_id(uid: int | None, cfg: Any) -> bool:
     return bool(uid is not None and uid in cfg.telegram.manager_user_ids) or is_super_admin_user_id(uid, cfg)
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]

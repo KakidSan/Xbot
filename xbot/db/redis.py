@@ -217,5 +217,3 @@ def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int,
     finally:
         client.close()
     return records
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

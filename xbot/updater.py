@@ -272,5 +272,3 @@ async def version_update_check_loop(app: Application, cfg: AppConfig, cache_path
             await asyncio.wait_for(stop_event.wait(), timeout=60)
         except asyncio.TimeoutError:
             continue
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

@@ -2496,5 +2496,3 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
                     """,
                     [(now_ts, user_id, ip) for user_id, ip in targets],
                 )
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

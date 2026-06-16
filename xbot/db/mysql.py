@@ -214,5 +214,3 @@ def connection_check_lines_sync(cfg: AppConfig, cache_path: Path) -> tuple[list[
         lines.extend(compact_connection_error_lines(redis_result))
     lines.append(f"{'🟢' if sqlite_ok else '🔴'} SQLite {sqlite_detail}")
     return (lines, mysql_ok, redis_ok, sqlite_ok)
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

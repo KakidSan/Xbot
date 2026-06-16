@@ -335,5 +335,3 @@ async def handle_fallback_message(update: Update, context: ContextTypes.DEFAULT_
 
 
 
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

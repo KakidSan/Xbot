@@ -326,5 +326,3 @@ def initialize_cache_before_notifications_sync(cfg: AppConfig, cache_path: Path)
     if require_ack:
         initialization_mark_complete_sync(cache_path, len(records), geo_total, geo_success, geo_failed)
     return True, "", mysql_ok, mysql_detail, geo_total, geo_success, geo_failed
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

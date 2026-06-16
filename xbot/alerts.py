@@ -93,5 +93,3 @@ async def check_ip_alerts(app: Application, cfg: AppConfig, cache_path: Path) ->
         row = {"user_id": user_id, "name": cached_user_name_by_id(cache_path, user_id) or f"用户{user_id}", "city_count": city_count, "threshold": threshold, "period": period, "period_label": period_label, "cities": cities, "rule_type": rule_type}
         await send_user_alert_to_chats(app, basic_or_advanced_chats, format_ip_alert(row, recovered=True, previous_city_count=previous.get(user_id)))
     alert_state_set_sync(cache_path, "ip_alert_active_users", json.dumps({str(user_id): int(row.get("city_count") or 0) for user_id, row in current.items()}, sort_keys=True))
-# Export this module's own public symbols for downstream star imports.
-__all__ = [name for name in globals() if not name.startswith("_")]

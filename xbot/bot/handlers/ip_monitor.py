@@ -13,7 +13,7 @@ from ...db.cache import (
     parse_ip_kind,
 )
 from ...geo import ignored_rules_text_sync
-from ..callback_data import normalize_main_menu_callback
+from ..callback_data import cb_ip_monitor, normalize_main_menu_callback
 from ..context import BotContext, user_data_of
 from ..formatters import format_ip_alert
 from ..keyboards import (
@@ -223,7 +223,7 @@ async def ip_monitor_callback(
         await show_callback_page(
             query,
             "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
-            InlineKeyboardMarkup([back_close_row("ip_monitor", "⬅️ 返回 IP 监控")]),
+            InlineKeyboardMarkup([back_close_row(cb_ip_monitor(), "⬅️ 返回 IP 监控")]),
             parse_mode="HTML",
         )
         return None
@@ -303,7 +303,9 @@ async def handle_ip_detail_callback(
             await show_callback_page(
                 query,
                 "✅ <b>异地登录恢复</b>\n────────────\n当前用户已不再满足异地登录告警条件。",
-                InlineKeyboardMarkup([back_close_row("ip_monitor", "⬅️ 返回 IP 监控")]),
+                InlineKeyboardMarkup(
+                    [back_close_row(cb_ip_monitor(), "⬅️ 返回 IP 监控")]
+                ),
                 parse_mode="HTML",
                 auto_delete=False,
             )

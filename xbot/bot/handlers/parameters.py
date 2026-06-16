@@ -147,7 +147,7 @@ def speedtest_jump_delete_keyboard(
             )
         )
     rows.append(nav)
-    rows.append(back_close_row("params:speedtest_jump", "⬅️ 返回测试工具"))
+    rows.append(back_close_row(cb_params("speedtest_jump"), "⬅️ 返回测试工具"))
     return InlineKeyboardMarkup(rows)
 
 

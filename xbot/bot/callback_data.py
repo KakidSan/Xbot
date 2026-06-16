@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
+# Builders
+
+
 def _callback(namespace: str, *parts: Any) -> str:
     return ":".join((namespace, *(str(part) for part in parts))) if parts else namespace
 
@@ -27,6 +30,8 @@ def cb_debug(*parts: Any) -> str:
     return _callback("debug", *parts)
 
 
+# Patterns
+
 VERSION_UPDATE_PATTERN = r"^version_update:(?:start|confirm):v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$|^version_update:cancel$"
 MAIN_MENU_PATTERN = r"^main_menu(?::(?:init_ack|clear_history|clear_history_confirm|system_check|system_check_refresh|traffic_management|traffic_users|traffic_nodes|traffic_alerts))?$"
 MAIN_MENU_OP_LOGS_PATTERN = r"^main_menu:op_logs(?::(?:traffic_alert|ip_alert|ip_ignore|reset_cache|reset_ip|parameter_config|auth)(?::\d+)?)?$"
@@ -45,6 +50,9 @@ ACTIVE_USERS_PATTERN = r"^(active_users(?::|_query:)(1h|24h|7d|30d)(?::\d+)?|ip_
 IP_DETAIL_PATTERN = r"^(?:ip_(?:detail_list|active_user_detail):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):(\d+)(?::\d+)?(?::alert)?|ip_alert_notice:\d+|ip_ignore_menu:(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+(?::alert)?|ip_ignore_page:(?:area|asn|cidr):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+:\d+(?::alert)?|ip_ig_t:[A-Za-z0-9]+|ip_ignore_toggle:(?:area|asn|cidr):(ip_(?:1h|24h|7d|30d)|iprange_\d+_\d+):\d+:\d+:\d+:[A-Za-z0-9]+(?::alert)?)$"
 DETAIL_BACK_PATTERN = r"^detail_back:(1h|24h|7d|30d|menu)$"
 CLOSE_MESSAGE_PATTERN = r"^close_message$"
+
+
+# Normalizers
 
 
 def normalize_main_menu_callback(data: str) -> str:

@@ -32,6 +32,7 @@ from ...db.cache import (
     ui_pref_set_sync,
     update_authorized_users_in_cache_sync,
 )
+from ..callback_data import cb_auth, cb_params
 from ..context import BotContext, user_data_of
 from ..formatters import (
     alert_global_setting_text_sync,
@@ -118,7 +119,7 @@ async def handle_fallback_message(
                 update,
                 context,
                 "🔐 <b>添加授权</b>\n────────────\n请发送 Telegram 用户 ID、@用户名 或 t.me 链接；或发送 /start 取消。",
-                InlineKeyboardMarkup([back_close_row("auth", "⬅️ 返回授权管理")]),
+                InlineKeyboardMarkup([back_close_row(cb_auth(), "⬅️ 返回授权管理")]),
             )
             return
         target_uid: int | None = (
@@ -144,7 +145,7 @@ async def handle_fallback_message(
                         context,
                         "🔐 <b>添加授权</b>\n────────────\n无法通过该用户名获取 Telegram 用户 ID；请确认 Bot 能访问该账号，或改用数字 ID。",
                         InlineKeyboardMarkup(
-                            [back_close_row("auth", "⬅️ 返回授权管理")]
+                            [back_close_row(cb_auth(), "⬅️ 返回授权管理")]
                         ),
                     )
                     return
@@ -176,7 +177,7 @@ async def handle_fallback_message(
                 log_operation_from_update_with_cache,
                 bot_ctx.cache_path,
                 update,
-                "auth",
+                cb_auth(),
                 "添加授权",
                 auth_change_detail(
                     [], [], before_users, after_users, added_user_id=target_uid
@@ -237,7 +238,7 @@ async def handle_fallback_message(
                 InlineKeyboardMarkup(
                     [
                         back_close_row(
-                            "params:speedtest_jump",
+                            cb_params("speedtest_jump"),
                             "⬅️ 返回测试工具",
                         )
                     ]
@@ -276,7 +277,7 @@ async def handle_fallback_message(
                     InlineKeyboardMarkup(
                         [
                             back_close_row(
-                                "params:speedtest_jump",
+                                cb_params("speedtest_jump"),
                                 "⬅️ 返回测试工具",
                             )
                         ]
@@ -298,7 +299,7 @@ async def handle_fallback_message(
                 InlineKeyboardMarkup(
                     [
                         back_close_row(
-                            "params:speedtest_jump",
+                            cb_params("speedtest_jump"),
                             "⬅️ 返回测试工具",
                         )
                     ]
@@ -330,7 +331,7 @@ async def handle_fallback_message(
             context,
             f"✅ <b>已添加测试工具</b>\n────────────\n{html.escape(nickname)} (<code>{html.escape(id_label)}</code>)",
             InlineKeyboardMarkup(
-                [back_close_row("params:speedtest_jump", "⬅️ 返回测试工具")]
+                [back_close_row(cb_params("speedtest_jump"), "⬅️ 返回测试工具")]
             ),
         )
         return None

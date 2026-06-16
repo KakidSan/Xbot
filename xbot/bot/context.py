@@ -39,7 +39,7 @@ class BotRuntime:
     reply_connection_status: Callable[..., Any]
     reply_long_text: Callable[..., Any]
     send_or_jump_traffic_dashboard: Callable[..., Any]
-    traffic_custom_state: TrafficCustomState
+    get_traffic_custom_state: TrafficCustomState
     traffic_custom_prompt_text: Callable[..., Any]
     show_callback_page: Callable[..., Any]
     answer_callback_silently: Callable[..., Any]

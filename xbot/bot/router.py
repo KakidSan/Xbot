@@ -29,6 +29,8 @@ from .callback_data import (
     VERSION_UPDATE_PATTERN,
 )
 from .context import BotRuntime
+from .handlers.alerts import handle_alert_callback
+from .handlers.auth import handle_auth_callback
 from .handlers.commands import (
     handle_active_users_command,
     handle_clear_history_command,
@@ -40,21 +42,19 @@ from .handlers.commands import (
     handle_traffic_users_command,
     handle_user_ip_query_command,
 )
-from .handlers.alerts import handle_alert_callback
-from .handlers.auth import handle_auth_callback
 from .handlers.debug import handle_debug_callback
 from .handlers.ip_monitor import (
     handle_ip_detail_callback,
     handle_ip_monitor_menu_callback,
 )
-from .handlers.notifications import handle_notifications_callback
-from .handlers.parameters import handle_parameters_callback
-from .handlers.text_input import handle_fallback_message
 from .handlers.main_menu import (
     handle_close_message_callback,
     handle_detail_back_callback,
     handle_main_menu_callback,
 )
+from .handlers.notifications import handle_notifications_callback
+from .handlers.parameters import handle_parameters_callback
+from .handlers.text_input import handle_fallback_message
 from .handlers.traffic import (
     handle_active_users_callback,
     handle_traffic_daily_callback,
@@ -68,36 +68,16 @@ from .handlers.version import (
 def register_handlers(app: Application, runtime: BotRuntime) -> None:
     """Register Telegram command, callback, and message handlers."""
 
+    app.bot_data["xbot_context"] = runtime.bot_ctx
+    _register_command_handlers(app, runtime)
+    _register_callback_handlers(app, runtime)
+    _register_message_handlers(app, runtime)
+
+
+def _register_command_handlers(app: Application, runtime: BotRuntime) -> None:
     bot_ctx = runtime.bot_ctx
     cfg = bot_ctx.cfg
     cache_path = bot_ctx.cache_path
-    app.bot_data["xbot_context"] = bot_ctx
-
-    reply_main_menu = runtime.reply_main_menu
-    delete_trigger_command_message = runtime.delete_trigger_command_message
-    track_auto_delete_message = runtime.track_auto_delete_message
-    reply_cover_card = runtime.reply_cover_card
-    edit_or_replace_status_any = runtime.edit_or_replace_status_any
-    reply_connection_status = runtime.reply_connection_status
-    reply_long_text = runtime.reply_long_text
-    send_or_jump_traffic_dashboard = runtime.send_or_jump_traffic_dashboard
-    show_callback_page = runtime.show_callback_page
-    answer_callback_silently = runtime.answer_callback_silently
-    cache_retention_text_sync = runtime.cache_retention_text_sync
-    cache_retention_preview_text = runtime.cache_retention_preview_text
-    show_initialization_gate = runtime.show_initialization_gate
-    send_start_menu = runtime.send_start_menu
-    open_dashboard_card = runtime.open_dashboard_card
-    purge_chat_history = runtime.purge_chat_history
-    resolve_telegram_user_label = runtime.resolve_telegram_user_label
-    mark_no_auto_delete_message = runtime.mark_no_auto_delete_message
-    send_dashboard_card = runtime.send_dashboard_card
-    edit_dashboard_card = runtime.edit_dashboard_card
-    open_traffic_dashboard_message = runtime.open_traffic_dashboard_message
-    switch_traffic_dashboard_message = runtime.switch_traffic_dashboard_message
-    context_bot_delete_message = runtime.context_bot_delete_message
-    edit_global_alert_prompt = runtime.edit_global_alert_prompt
-    edit_alert_prompt = runtime.edit_alert_prompt
 
     app.add_handler(
         CommandHandler(
@@ -105,8 +85,8 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_start_command,
                 cfg=cfg,
-                reply_main_menu=reply_main_menu,
-                delete_trigger_command_message=delete_trigger_command_message,
+                reply_main_menu=runtime.reply_main_menu,
+                delete_trigger_command_message=runtime.delete_trigger_command_message,
             ),
         )
     )
@@ -116,7 +96,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_clear_history_command,
                 cfg=cfg,
-                track_auto_delete_message=track_auto_delete_message,
+                track_auto_delete_message=runtime.track_auto_delete_message,
             ),
         )
     )
@@ -127,10 +107,10 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 update,
                 context,
                 bot_ctx,
-                reply_cover_card,
-                edit_or_replace_status_any,
-                delete_trigger_command_message,
-                reply_connection_status,
+                runtime.reply_cover_card,
+                runtime.edit_or_replace_status_any,
+                runtime.delete_trigger_command_message,
+                runtime.reply_connection_status,
             ),
         )
     )
@@ -141,7 +121,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_status_command,
                 cfg=cfg,
                 cache_path=cache_path,
-                track_auto_delete_message=track_auto_delete_message,
+                track_auto_delete_message=runtime.track_auto_delete_message,
             ),
         )
     )
@@ -152,8 +132,8 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_health_command,
                 cfg=cfg,
                 cache_path=cache_path,
-                track_auto_delete_message=track_auto_delete_message,
-                reply_long_text=reply_long_text,
+                track_auto_delete_message=runtime.track_auto_delete_message,
+                reply_long_text=runtime.reply_long_text,
             ),
         )
     )
@@ -164,7 +144,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_active_users_command,
                 cfg=cfg,
                 cache_path=cache_path,
-                track_auto_delete_message=track_auto_delete_message,
+                track_auto_delete_message=runtime.track_auto_delete_message,
             ),
         )
     )
@@ -174,7 +154,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_user_ip_query_command,
                 cfg=cfg,
-                track_auto_delete_message=track_auto_delete_message,
+                track_auto_delete_message=runtime.track_auto_delete_message,
             ),
         )
     )
@@ -184,7 +164,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_traffic_daily_command,
                 cfg=cfg,
-                track_auto_delete_message=track_auto_delete_message,
+                track_auto_delete_message=runtime.track_auto_delete_message,
             ),
         )
     )
@@ -194,7 +174,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_traffic_users_command,
                 cfg=cfg,
-                send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard,
+                send_or_jump_traffic_dashboard=runtime.send_or_jump_traffic_dashboard,
             ),
         )
     )
@@ -204,52 +184,52 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             partial(
                 handle_traffic_nodes_command,
                 cfg=cfg,
-                send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard,
+                send_or_jump_traffic_dashboard=runtime.send_or_jump_traffic_dashboard,
             ),
         )
     )
+
+
+def _register_callback_handlers(app: Application, runtime: BotRuntime) -> None:
+    bot_ctx = runtime.bot_ctx
+    cfg = bot_ctx.cfg
+    cache_path = bot_ctx.cache_path
+
+    main_menu_handler = partial(
+        handle_main_menu_callback,
+        cfg=cfg,
+        bot_ctx=bot_ctx,
+        cache_path=cache_path,
+        cache_retention_text_sync=runtime.cache_retention_text_sync,
+        cache_retention_preview_text=runtime.cache_retention_preview_text,
+        show_initialization_gate=runtime.show_initialization_gate,
+        answer_callback_silently=runtime.answer_callback_silently,
+        show_callback_page=runtime.show_callback_page,
+        send_start_menu=runtime.send_start_menu,
+        open_dashboard_card=runtime.open_dashboard_card,
+        purge_chat_history=runtime.purge_chat_history,
+        resolve_telegram_user_label=runtime.resolve_telegram_user_label,
+        reply_long_text=runtime.reply_long_text,
+        send_or_jump_traffic_dashboard=runtime.send_or_jump_traffic_dashboard,
+        traffic_custom_state=runtime.get_traffic_custom_state,
+        traffic_custom_prompt_text=runtime.traffic_custom_prompt_text,
+    )
+
     app.add_handler(
         CallbackQueryHandler(
             lambda update, context: handle_version_update_callback(
                 update,
                 context,
                 bot_ctx,
-                show_callback_page,
-                answer_callback_silently,
+                runtime.show_callback_page,
+                runtime.answer_callback_silently,
             ),
             pattern=VERSION_UPDATE_PATTERN,
         )
     )
-    main_menu_handler = partial(
-        handle_main_menu_callback,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        cache_retention_text_sync=cache_retention_text_sync,
-        cache_retention_preview_text=cache_retention_preview_text,
-        show_initialization_gate=show_initialization_gate,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-        send_start_menu=send_start_menu,
-        open_dashboard_card=open_dashboard_card,
-        purge_chat_history=purge_chat_history,
-        resolve_telegram_user_label=resolve_telegram_user_label,
-        reply_long_text=reply_long_text,
-        send_or_jump_traffic_dashboard=send_or_jump_traffic_dashboard,
-        traffic_custom_state=runtime.traffic_custom_state,
-        traffic_custom_prompt_text=runtime.traffic_custom_prompt_text,
-    )
+    app.add_handler(CallbackQueryHandler(main_menu_handler, pattern=MAIN_MENU_PATTERN))
     app.add_handler(
-        CallbackQueryHandler(
-            main_menu_handler,
-            pattern=MAIN_MENU_PATTERN,
-        )
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            main_menu_handler,
-            pattern=MAIN_MENU_OP_LOGS_PATTERN,
-        )
+        CallbackQueryHandler(main_menu_handler, pattern=MAIN_MENU_OP_LOGS_PATTERN)
     )
     app.add_handler(
         CallbackQueryHandler(
@@ -258,9 +238,9 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                resolve_telegram_user_label=resolve_telegram_user_label,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                resolve_telegram_user_label=runtime.resolve_telegram_user_label,
             ),
             pattern=MAIN_MENU_AUTH_PATTERN,
         )
@@ -272,9 +252,9 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                open_dashboard_card=open_dashboard_card,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                open_dashboard_card=runtime.open_dashboard_card,
             ),
             pattern=MAIN_MENU_IP_MONITOR_PATTERN,
         )
@@ -282,12 +262,7 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
     app.add_handler(
         CallbackQueryHandler(main_menu_handler, pattern=MAIN_MENU_NOOP_PATTERN)
     )
-    app.add_handler(
-        CallbackQueryHandler(
-            main_menu_handler,
-            pattern=NODE_LINK_PATTERN,
-        )
-    )
+    app.add_handler(CallbackQueryHandler(main_menu_handler, pattern=NODE_LINK_PATTERN))
     app.add_handler(
         CallbackQueryHandler(
             partial(
@@ -295,10 +270,10 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                cache_retention_text_sync=cache_retention_text_sync,
-                cache_retention_preview_text=cache_retention_preview_text,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                cache_retention_text_sync=runtime.cache_retention_text_sync,
+                cache_retention_preview_text=runtime.cache_retention_preview_text,
             ),
             pattern=MAIN_MENU_PARAMETER_CONFIG_PATTERN,
         )
@@ -309,8 +284,8 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_notifications_callback,
                 cfg=cfg,
                 bot_ctx=bot_ctx,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
             ),
             pattern=MAIN_MENU_NOTIFICATIONS_PATTERN,
         )
@@ -322,9 +297,9 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                traffic_custom_state=runtime.traffic_custom_state,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                traffic_custom_state=runtime.get_traffic_custom_state,
                 traffic_custom_prompt_text=runtime.traffic_custom_prompt_text,
             ),
             pattern=MAIN_MENU_DEBUG_PATTERN,
@@ -337,10 +312,10 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                show_initialization_gate=show_initialization_gate,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                mark_no_auto_delete_message=mark_no_auto_delete_message,
+                show_initialization_gate=runtime.show_initialization_gate,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                mark_no_auto_delete_message=runtime.mark_no_auto_delete_message,
             ),
             pattern=ALERT_PATTERN,
         )
@@ -352,13 +327,13 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                show_initialization_gate=show_initialization_gate,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                send_dashboard_card=send_dashboard_card,
-                edit_dashboard_card=edit_dashboard_card,
-                open_traffic_dashboard_message=open_traffic_dashboard_message,
-                switch_traffic_dashboard_message=switch_traffic_dashboard_message,
+                show_initialization_gate=runtime.show_initialization_gate,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                send_dashboard_card=runtime.send_dashboard_card,
+                edit_dashboard_card=runtime.edit_dashboard_card,
+                open_traffic_dashboard_message=runtime.open_traffic_dashboard_message,
+                switch_traffic_dashboard_message=runtime.switch_traffic_dashboard_message,
             ),
             pattern=TRAFFIC_DAILY_PATTERN,
         )
@@ -369,10 +344,10 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_active_users_callback,
                 cfg=cfg,
                 cache_path=cache_path,
-                show_initialization_gate=show_initialization_gate,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                open_dashboard_card=open_dashboard_card,
+                show_initialization_gate=runtime.show_initialization_gate,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                open_dashboard_card=runtime.open_dashboard_card,
             ),
             pattern=ACTIVE_USERS_PATTERN,
         )
@@ -384,10 +359,10 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                show_initialization_gate=show_initialization_gate,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
-                mark_no_auto_delete_message=mark_no_auto_delete_message,
+                show_initialization_gate=runtime.show_initialization_gate,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
+                mark_no_auto_delete_message=runtime.mark_no_auto_delete_message,
             ),
             pattern=IP_DETAIL_PATTERN,
         )
@@ -398,8 +373,8 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 handle_detail_back_callback,
                 cfg=cfg,
                 cache_path=cache_path,
-                answer_callback_silently=answer_callback_silently,
-                show_callback_page=show_callback_page,
+                answer_callback_silently=runtime.answer_callback_silently,
+                show_callback_page=runtime.show_callback_page,
             ),
             pattern=DETAIL_BACK_PATTERN,
         )
@@ -410,6 +385,13 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
             pattern=CLOSE_MESSAGE_PATTERN,
         )
     )
+
+
+def _register_message_handlers(app: Application, runtime: BotRuntime) -> None:
+    bot_ctx = runtime.bot_ctx
+    cfg = bot_ctx.cfg
+    cache_path = bot_ctx.cache_path
+
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -418,12 +400,12 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
                 cfg=cfg,
                 bot_ctx=bot_ctx,
                 cache_path=cache_path,
-                track_auto_delete_message=track_auto_delete_message,
-                reply_cover_card=reply_cover_card,
-                resolve_telegram_user_label=resolve_telegram_user_label,
-                context_bot_delete_message=context_bot_delete_message,
-                edit_global_alert_prompt=edit_global_alert_prompt,
-                edit_alert_prompt=edit_alert_prompt,
+                track_auto_delete_message=runtime.track_auto_delete_message,
+                reply_cover_card=runtime.reply_cover_card,
+                resolve_telegram_user_label=runtime.resolve_telegram_user_label,
+                context_bot_delete_message=runtime.context_bot_delete_message,
+                edit_global_alert_prompt=runtime.edit_global_alert_prompt,
+                edit_alert_prompt=runtime.edit_alert_prompt,
             ),
         )
     )

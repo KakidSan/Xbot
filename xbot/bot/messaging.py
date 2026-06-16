@@ -792,7 +792,7 @@ def build_runtime_services(
         "reply_cover_card": partial(reply_cover_card, cache_path, track),
         "reply_long_text": partial(reply_long_text, track),
         "send_or_jump_traffic_dashboard": send_or_jump,
-        "traffic_custom_state": traffic_custom_state,
+        "get_traffic_custom_state": traffic_custom_state,
         "traffic_custom_prompt_text": partial(traffic_custom_prompt_text, cache_path),
         "show_callback_page": show_page,
         "answer_callback_silently": answer_callback_silently,

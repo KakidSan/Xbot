@@ -55,4 +55,4 @@ jobs:
             -m unittest discover -q -s tests
           python -m coverage report \
             --include='xbot/bot/application.py,xbot/bot/router.py,xbot/bot/callback_data.py,xbot/bot/operation_details.py,xbot/bot/operation_logs.py,xbot/bot/formatters.py,xbot/bot/keyboards.py,xbot/bot/handlers/parameters.py,xbot/bot/handlers/text_input.py,xbot/node_monitor.py,xbot/db/cache/_core.py' \
-            --fail-under=30
+            --fail-under=35

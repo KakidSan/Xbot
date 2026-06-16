@@ -12,7 +12,7 @@ from ...common import (
 )
 from ...config import AppConfig
 from ...db.cache import update_telegram_roles_in_cache_sync
-from ..callback_data import normalize_main_menu_callback
+from ..callback_data import cb_auth, normalize_main_menu_callback
 from ..authorization import (
     authorization_delete_confirm_keyboard as authorization_delete_confirm_keyboard_for_cfg,
     authorization_delete_keyboard as authorization_delete_keyboard_for_cfg,
@@ -109,7 +109,7 @@ async def auth_callback(
         await show_callback_page(
             query,
             "🔐 <b>添加授权</b>\n────────────\n请输入要授权的 Telegram 用户 ID、@用户名 或 t.me 链接。",
-            InlineKeyboardMarkup([back_close_row("auth", "⬅️ 返回授权管理")]),
+            InlineKeyboardMarkup([back_close_row(cb_auth(), "⬅️ 返回授权管理")]),
             parse_mode="HTML",
         )
         return None
@@ -199,7 +199,7 @@ async def auth_callback(
             log_operation_from_query_with_cache,
             bot_ctx.cache_path,
             query,
-            "auth",
+            cb_auth(),
             "权限变更",
             auth_change_detail(
                 before_managers, after_managers, before_users, after_users
@@ -307,7 +307,7 @@ async def auth_callback(
             log_operation_from_query_with_cache,
             bot_ctx.cache_path,
             query,
-            "auth",
+            cb_auth(),
             "删除授权",
             auth_change_detail(
                 before_managers,

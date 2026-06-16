@@ -16,8 +16,8 @@ from .handlers.commands import (
     handle_traffic_users_command,
     handle_user_ip_query_command,
 )
+from .handlers.alerts import handle_alert_callback
 from .handlers.legacy import (
-    handle_alert_callback,
     handle_fallback_message,
     handle_ip_detail_callback,
 )

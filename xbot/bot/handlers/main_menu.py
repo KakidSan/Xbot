@@ -10,7 +10,7 @@ from ..menus import clear_history_confirm_keyboard, empty_section_keyboard, heal
 from .auth import auth_callback
 from .debug import debug_callback
 from .ip_monitor import ip_monitor_callback
-from .legacy import is_allowed, is_bot_self_update
+from ..permissions import is_allowed, is_bot_self_update
 from .operation_logs import operation_logs_callback
 from .parameters import parameter_callback
 

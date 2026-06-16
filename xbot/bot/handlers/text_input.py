@@ -17,7 +17,7 @@ from ..formatters import format_bytes, user_display
 from ..keyboards import alert_global_keyboard, alert_user_setting_keyboard, traffic_custom_keyboard_for_state, user_ip_query_page_keyboard
 from ..operation_details import alert_category, alert_setting_before_after_detail
 from ..operation_logs import log_operation_from_update as log_operation_from_update_with_cache
-from .legacy import is_allowed, is_bot_self_update
+from ..permissions import is_allowed, is_bot_self_update
 
 
 async def handle_fallback_message(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, bot_ctx: BotContext, cache_path: Path, track_auto_delete_message, reply_cover_card, resolve_telegram_user_label, context_bot_delete_message, edit_global_alert_prompt, edit_alert_prompt) -> None:

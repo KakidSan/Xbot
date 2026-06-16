@@ -184,6 +184,10 @@ async def cleanup_legacy_traffic_dashboard_messages(app: Application, cache_path
             pass
         await asyncio.to_thread(pinned_dashboard_delete_sync, cache_path, kind, chat_id)
 
+
+cleanup_traffic_dashboard_messages = cleanup_legacy_traffic_dashboard_messages
+
+
 def due_traffic_report_kinds(now: datetime | None = None) -> list[str]:
     current = now.astimezone(BEIJING_TZ) if now else beijing_now()
     # 00:03 以后发送，给 00:00 附近最后一轮采样一点缓冲。

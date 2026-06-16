@@ -15,7 +15,8 @@ from ...db.cache import initialization_progress_text_sync, initialization_status
 from ..formatters import bot_health_overview_text_sync, bot_status_text_sync
 from ..keyboards import active_users_keyboard, traffic_period_keyboard
 from ..menus import clear_history_confirm_keyboard
-from .legacy import edit_or_replace_status, is_allowed, is_bot_self_update, reply_connection_status
+from ..message_utils import edit_or_replace_status, reply_connection_status
+from ..permissions import is_allowed, is_bot_self_update
 
 
 async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, reply_main_menu, delete_trigger_command_message) -> None:

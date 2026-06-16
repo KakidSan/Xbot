@@ -24,8 +24,8 @@ class BotContext:
 class BotRuntime:
     """Application runtime services shared by router and handlers.
 
-    This keeps ``router.register_handlers`` stable while the legacy application
-    factory is being split into smaller runtime/message/permission modules.
+    This keeps ``router.register_handlers`` stable while the application
+    factory is split into smaller runtime/message/permission modules.
     """
 
     bot_ctx: BotContext

@@ -45,7 +45,7 @@ from ..keyboards import (
 from ..menus import back_close_row
 from ..operation_logs import log_operation_from_query as log_operation_from_query_with_cache
 from ...db.cache import make_range_kind
-from .legacy import is_allowed, is_bot_self_update
+from ..permissions import is_allowed, is_bot_self_update
 
 
 async def handle_active_users_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, show_initialization_gate, answer_callback_silently, show_callback_page, open_dashboard_card) -> None:

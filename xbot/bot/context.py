@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 from ..config import AppConfig
 
+TrafficCustomState = Callable[[Any], dict[str, Any]]
+
 
 @dataclass(slots=True, frozen=True)
 class BotContext:
@@ -37,7 +39,7 @@ class BotRuntime:
     reply_connection_status: Callable[..., Any]
     reply_long_text: Callable[..., Any]
     send_or_jump_traffic_dashboard: Callable[..., Any]
-    traffic_custom_state: Callable[..., Any]
+    traffic_custom_state: TrafficCustomState
     traffic_custom_prompt_text: Callable[..., Any]
     show_callback_page: Callable[..., Any]
     answer_callback_silently: Callable[..., Any]

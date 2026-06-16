@@ -244,7 +244,13 @@ def register_handlers(app: Application, runtime: BotRuntime) -> None:
     app.add_handler(
         CallbackQueryHandler(
             main_menu_handler,
-            pattern=r"^main_menu:parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1q|1y|all)|cache_retention_confirm:(?:1m|1q|1y|all)))?$",
+            pattern=r"^(main_menu:node_links|node_link:(?:page:\d+|refresh:\d+|select:\d+:\d+))$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            main_menu_handler,
+            pattern=r"^main_menu:parameter_config(?::(?:cover|cover_reset|nickname|nickname_reset|cache_retention|cache_retention_select:(?:1m|1y|all)|cache_retention_confirm:(?:1m|1y|all)|speedtest_jump|speedtest_jump:add|speedtest_jump:delete:\d+|speedtest_jump:delete_target:-?\d+:\d+))?$",
         )
     )
     app.add_handler(

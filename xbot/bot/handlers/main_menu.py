@@ -24,6 +24,13 @@ from ...db.cache import (
 from ..context import BotContext
 from ..formatters import bot_health_overview_text_sync, notification_ip_alert_mode_label
 from ..keyboards import active_users_keyboard, notification_push_keyboard
+from ...node_monitor import (
+    format_node_link_detail_sync,
+    format_node_links_text_sync,
+    node_link_detail_keyboard_sync,
+    node_links_keyboard_sync,
+    refresh_subscription_nodes_sync,
+)
 from ..menus import (
     clear_history_confirm_keyboard,
     empty_section_keyboard,
@@ -210,6 +217,30 @@ async def handle_main_menu_callback(
             )
         if is_refresh:
             await query.answer("刷新成功")
+        return None
+
+    if data.startswith("main_menu:node_links") or data.startswith("node_link:"):
+        await answer_callback_silently(query)
+        page = 0
+        select_match = re.fullmatch(r"node_link:select:(\d+):(\d+)", data)
+        page_match = re.fullmatch(r"node_link:page:(\d+)", data)
+        refresh_match = re.fullmatch(r"node_link:refresh:(\d+)", data)
+        if select_match:
+            node_id = int(select_match.group(1))
+            page = int(select_match.group(2))
+            text = await asyncio.to_thread(format_node_link_detail_sync, cfg, node_id)
+            keyboard = await asyncio.to_thread(node_link_detail_keyboard_sync, cache_path, query.from_user.id, page)
+            await show_callback_page(query, text, keyboard, parse_mode="HTML")
+            return None
+        if refresh_match:
+            page = int(refresh_match.group(1))
+            total = await asyncio.to_thread(refresh_subscription_nodes_sync, cfg)
+            await query.answer(f"已刷新，可用节点 {total} 个")
+        if page_match:
+            page = int(page_match.group(1))
+        text = await asyncio.to_thread(format_node_links_text_sync, cfg, page)
+        keyboard = await asyncio.to_thread(node_links_keyboard_sync, cfg, page)
+        await show_callback_page(query, text, keyboard, parse_mode="HTML")
         return None
 
     if data in {"main_menu:notifications", "main_menu:status_notice"}:

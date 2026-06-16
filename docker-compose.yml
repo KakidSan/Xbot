@@ -29,6 +29,9 @@ services:
       MYSQL_USERNAME: ${MYSQL_USERNAME:?set MYSQL_USERNAME}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
 
+      # 链接提取：从指定 Xboard 用户读取官方订阅。
+      LINK_EXTRACT_USER_ID: ${LINK_EXTRACT_USER_ID:-1}
+
       # 采集间隔、IP-API 限速、缓存路径、缓存保留时间由程序内置/Bot 参数配置管理。
 
       # Bot 内「后台更新」所需参数。不开启 Docker socket 时可以保留这些值，更新按钮会提示缺少 socket。

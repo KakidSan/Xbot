@@ -26,9 +26,10 @@ def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             ),
             InlineKeyboardButton("🌐 IP 监控", callback_data="main_menu:ip_monitor"),
         ],
+        [InlineKeyboardButton("💡 链接提取", callback_data="main_menu:node_links")],
         [
             InlineKeyboardButton(
-                "🎨 参数配置", callback_data="main_menu:parameter_config"
+                "🎨 个人设置", callback_data="main_menu:parameter_config"
             ),
             InlineKeyboardButton("🧪 调试功能", callback_data="main_menu:debug_tools"),
         ],
@@ -155,6 +156,11 @@ def parameter_config_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    "🤖 测试工具", callback_data="main_menu:parameter_config:speedtest_jump"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     "🗄 缓存保留时间",
                     callback_data="main_menu:parameter_config:cache_retention",
                 )
@@ -245,7 +251,7 @@ def cover_config_keyboard() -> InlineKeyboardMarkup:
                     callback_data="main_menu:parameter_config:cover_reset",
                 )
             ],
-            back_close_row("main_menu:parameter_config", "⬅️ 返回参数配置"),
+            back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
         ]
     )
 
@@ -259,6 +265,6 @@ def nickname_config_keyboard() -> InlineKeyboardMarkup:
                     callback_data="main_menu:parameter_config:nickname_reset",
                 )
             ],
-            back_close_row("main_menu:parameter_config", "⬅️ 返回参数配置"),
+            back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
         ]
     )

@@ -626,6 +626,26 @@ def init_cache(path: Path) -> None:
                 PRIMARY KEY (user_id, key)
             );
 
+            CREATE TABLE IF NOT EXISTS speedtest_jump_targets (
+                owner_user_id INTEGER NOT NULL DEFAULT 0,
+                telegram_id INTEGER PRIMARY KEY,
+                nickname TEXT NOT NULL,
+                username TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS test_tool_targets (
+                owner_user_id INTEGER NOT NULL,
+                telegram_id INTEGER NOT NULL,
+                nickname TEXT NOT NULL,
+                username TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_user_id, telegram_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_test_tool_targets_owner
+                ON test_tool_targets(owner_user_id, nickname COLLATE NOCASE, telegram_id);
+
             CREATE TABLE IF NOT EXISTS operation_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at INTEGER NOT NULL,
@@ -683,6 +703,16 @@ def init_cache(path: Path) -> None:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_reason TEXT")
         if "ignore_note" not in active_ip_columns:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_note TEXT")
+        speedtest_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(speedtest_jump_targets)").fetchall()
+        }
+        if "username" not in speedtest_columns:
+            conn.execute("ALTER TABLE speedtest_jump_targets ADD COLUMN username TEXT")
+        if "owner_user_id" not in speedtest_columns:
+            conn.execute(
+                "ALTER TABLE speedtest_jump_targets ADD COLUMN owner_user_id INTEGER NOT NULL DEFAULT 0"
+            )
         geo_cache_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(ip_geo_cache)").fetchall()
         }
@@ -768,6 +798,47 @@ def ui_pref_delete_sync(cache_path: Path, user_id: int, key: str) -> None:
         conn.execute(
             "DELETE FROM ui_preferences WHERE user_id = ? AND key = ?", (user_id, key)
         )
+
+
+def speedtest_jump_targets_sync(cache_path: Path, owner_user_id: int) -> list[dict[str, Any]]:
+    init_cache(cache_path)
+    with cache_connect(cache_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT owner_user_id, telegram_id, nickname, username, created_at, updated_at
+            FROM test_tool_targets
+            WHERE owner_user_id = ?
+            ORDER BY nickname COLLATE NOCASE ASC, telegram_id ASC
+            """,
+            (int(owner_user_id),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def speedtest_jump_target_upsert_sync(cache_path: Path, owner_user_id: int, telegram_id: int, nickname: str, username: str | None = None) -> None:
+    init_cache(cache_path)
+    now_ts = int(datetime.now().timestamp())
+    with cache_connect(cache_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO test_tool_targets(owner_user_id, telegram_id, nickname, username, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_user_id, telegram_id) DO UPDATE SET
+                nickname = excluded.nickname,
+                username = excluded.username,
+                updated_at = excluded.updated_at
+            """,
+            (int(owner_user_id), int(telegram_id), str(nickname), str(username or "") or None, now_ts, now_ts),
+        )
+
+
+def speedtest_jump_target_delete_sync(cache_path: Path, owner_user_id: int, telegram_id: int) -> bool:
+    init_cache(cache_path)
+    with cache_connect(cache_path) as conn:
+        cur = conn.execute(
+            "DELETE FROM test_tool_targets WHERE owner_user_id = ? AND telegram_id = ?", (int(owner_user_id), int(telegram_id)),
+        )
+        return cur.rowcount > 0
 
 
 def actor_name_from_user(user: Any) -> str:
@@ -1828,12 +1899,12 @@ def cache_retention_option_key(days: int) -> str:
     for key, (option_days, _) in CACHE_RETENTION_OPTIONS.items():
         if int(days) == int(option_days):
             return key
-    return "1m"
+    return "all"
 
 
 def cache_retention_label(days: int) -> str:
     return CACHE_RETENTION_OPTIONS.get(
-        cache_retention_option_key(days), CACHE_RETENTION_OPTIONS["1m"]
+        cache_retention_option_key(days), CACHE_RETENTION_OPTIONS["all"]
     )[1]
 
 

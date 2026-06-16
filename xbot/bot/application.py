@@ -31,6 +31,7 @@ from ..collector import (
     traffic_sampler_loop,
 )
 from ..updater import send_update_result_notice, version_update_check_loop
+from ..node_monitor import subscription_nodes_refresh_loop
 from .context import BotContext, BotRuntime
 from .message_utils import edit_or_replace_status_any, reply_connection_status
 
@@ -71,7 +72,9 @@ async def run_once(
     report_stop_event = asyncio.Event()
     report_task: asyncio.Task[Any] | None = None
     version_stop_event = asyncio.Event()
+    subscription_nodes_stop_event = asyncio.Event()
     version_task: asyncio.Task[Any] | None = None
+    subscription_nodes_task: asyncio.Task[Any] | None = None
 
     await app.initialize()
     await app.bot.set_my_commands(BOT_COMMANDS)
@@ -146,6 +149,9 @@ async def run_once(
             app, bot_ctx.cfg, bot_ctx.cache_path, version_stop_event
         )
     )
+    subscription_nodes_task = asyncio.create_task(
+        subscription_nodes_refresh_loop(bot_ctx.cfg, subscription_nodes_stop_event)
+    )
     await send_update_result_notice(app)
     log.info("Telegram Bot 已启动，缓存文件：%s", bot_ctx.cache_path)
 
@@ -159,6 +165,7 @@ async def run_once(
         dashboard_stop_event.set()
         report_stop_event.set()
         version_stop_event.set()
+        subscription_nodes_stop_event.set()
         if collector_task:
             try:
                 await asyncio.wait_for(collector_task, timeout=10)
@@ -184,6 +191,11 @@ async def run_once(
                 await asyncio.wait_for(version_task, timeout=10)
             except asyncio.TimeoutError:
                 version_task.cancel()
+        if subscription_nodes_task:
+            try:
+                await asyncio.wait_for(subscription_nodes_task, timeout=10)
+            except asyncio.TimeoutError:
+                subscription_nodes_task.cancel()
         await app.updater.stop()
         await app.stop()
         await app.shutdown()

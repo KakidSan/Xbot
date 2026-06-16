@@ -20,9 +20,9 @@ def set_xboard_user_name(cache_path: Path, user_id: int, name: str) -> None:
 
 class OperationLogsTest(unittest.TestCase):
     def test_operation_log_action_label_adds_icon_only_once(self) -> None:
-        self.assertEqual(operation_log_action_label("auth", "增加授权"), "🔐 增加授权")
+        self.assertEqual(operation_log_action_label("auth", "添加授权"), "🔐 添加授权")
         self.assertEqual(
-            operation_log_action_label("auth", "🔐 增加授权"), "🔐 增加授权"
+            operation_log_action_label("auth", "🔐 添加授权"), "🔐 添加授权"
         )
         self.assertEqual(operation_log_action_label("unknown", "动作"), "动作")
 

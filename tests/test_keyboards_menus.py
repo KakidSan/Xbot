@@ -113,6 +113,7 @@ class MenusTest(unittest.TestCase):
                     "main_menu:parameter_config:cover",
                     "main_menu:parameter_config:nickname",
                     "main_menu:parameter_config:cache_retention",
+                    "main_menu:parameter_config:speedtest_jump",
                 },
             ),
             (
@@ -287,9 +288,9 @@ class KeyboardsTest(unittest.TestCase):
 
     def test_cache_retention_confirm_keyboard(self) -> None:
         self.assertEqual(
-            callback_data(cache_retention_confirm_keyboard("1q")),
+            callback_data(cache_retention_confirm_keyboard("all")),
             [
-                "main_menu:parameter_config:cache_retention_confirm:1q",
+                "main_menu:parameter_config:cache_retention_confirm:all",
                 "main_menu:parameter_config:cache_retention",
                 "close_message",
             ],

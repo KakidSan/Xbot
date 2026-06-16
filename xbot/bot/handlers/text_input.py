@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import zlib
+
 from ...common import (
     Any,
     BadRequest,
@@ -26,6 +28,7 @@ from ...db.cache import (
     alert_user_setting_sync,
     count_user_ips_from_cache_sync,
     query_user_ips_from_cache_sync,
+    speedtest_jump_target_upsert_sync,
     ui_pref_set_sync,
     update_authorized_users_in_cache_sync,
 )
@@ -61,6 +64,26 @@ from ..operation_logs import (
 from ..permissions import is_allowed, is_bot_self_update, user_id
 
 
+def _parse_test_tool_target(raw: str) -> tuple[str, str | int | None]:
+    text = raw.strip()
+    match = re.search(r"(?:https?://)?t\.me/([A-Za-z0-9_]{5,})", text, re.IGNORECASE)
+    if match:
+        username = match.group(1).lstrip("@")
+        return username, f"@{username}"
+    if re.fullmatch(r"@[A-Za-z0-9_]{5,}", text):
+        username = text.lstrip("@")
+        return username, f"@{username}"
+    if re.fullmatch(r"[A-Za-z0-9_]{5,}", text) and not text.isdigit():
+        return text, f"@{text}"
+    if re.fullmatch(r"\d+", text):
+        return text, int(text)
+    return text, None
+
+
+def _synthetic_telegram_id(username: str) -> int:
+    return -int(zlib.crc32(username.lower().encode("utf-8")) or 1)
+
+
 async def handle_fallback_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -89,29 +112,52 @@ async def handle_fallback_message(
             await reply_connection_status(update, cfg)
             return
         text = (effective_message.text or "").strip()
-        if not re.fullmatch(r"\d+", text):
+        parsed_label, lookup_target = _parse_test_tool_target(text)
+        if lookup_target is None:
             await reply_cover_card(
                 update,
                 context,
-                "🔐 <b>增加授权</b>\n────────────\nTelegram 用户 ID 必须是纯数字，请重新输入；或发送 /start 取消。",
+                "🔐 <b>添加授权</b>\n────────────\n请发送 Telegram 用户 ID、@用户名 或 t.me 链接；或发送 /start 取消。",
                 InlineKeyboardMarkup(
                     [back_close_row("main_menu:auth", "⬅️ 返回授权管理")]
                 ),
             )
             return
-        target_uid = int(text)
+        target_uid: int | None = int(lookup_target) if isinstance(lookup_target, int) else None
         try:
+            if target_uid is None:
+                try:
+                    chat = await context.bot.get_chat(lookup_target)
+                    target_uid = int(chat.id)
+                    label = str(
+                        getattr(chat, "full_name", None)
+                        or getattr(chat, "title", None)
+                        or getattr(chat, "username", None)
+                        or parsed_label
+                    )
+                except Exception as exc:
+                    log.warning("通过用户名解析授权用户失败 target=%s：%s", lookup_target, exc)
+                    await reply_cover_card(
+                        update,
+                        context,
+                        "🔐 <b>添加授权</b>\n────────────\n无法通过该用户名获取 Telegram 用户 ID；请确认 Bot 能访问该账号，或改用数字 ID。",
+                        InlineKeyboardMarkup(
+                            [back_close_row("main_menu:auth", "⬅️ 返回授权管理")]
+                        ),
+                    )
+                    return
+            else:
+                label = await resolve_telegram_user_label(target_uid)
             if target_uid in cfg.telegram.admin_user_ids:
                 await reply_cover_card(
                     update,
                     context,
-                    "🔐 <b>增加授权</b>\n────────────\n该用户已是管理员，无需重复授权。",
+                    "🔐 <b>添加授权</b>\n────────────\n该用户已是管理员，无需重复授权。",
                     authorization_manage_keyboard_for_cfg(
                         is_super_admin_user_id(user_id(update), bot_ctx.cfg)
                     ),
                 )
                 return
-            label = await resolve_telegram_user_label(target_uid)
             before_users = sorted(cfg.telegram.authorized_user_ids)
             new_users = await asyncio.to_thread(
                 update_authorized_users_in_cache_sync,
@@ -129,7 +175,7 @@ async def handle_fallback_message(
                 bot_ctx.cache_path,
                 update,
                 "auth",
-                "增加授权",
+                "添加授权",
                 auth_change_detail(
                     [], [], before_users, after_users, added_user_id=target_uid
                 ),
@@ -138,7 +184,7 @@ async def handle_fallback_message(
             await reply_cover_card(
                 update,
                 context,
-                f"🔐 <b>增加授权</b>\n────────────\n{html.escape(str(exc))}",
+                f"🔐 <b>添加授权</b>\n────────────\n{html.escape(str(exc))}",
                 authorization_manage_keyboard_for_cfg(
                     is_super_admin_user_id(user_id(update), bot_ctx.cfg)
                 ),
@@ -149,7 +195,7 @@ async def handle_fallback_message(
             await reply_cover_card(
                 update,
                 context,
-                "🔐 <b>增加授权</b>\n────────────\n写入授权失败，请检查运行状态。",
+                "🔐 <b>添加授权</b>\n────────────\n写入授权失败，请检查运行状态。",
                 authorization_manage_keyboard_for_cfg(
                     is_super_admin_user_id(user_id(update), bot_ctx.cfg)
                 ),
@@ -159,7 +205,7 @@ async def handle_fallback_message(
         await reply_cover_card(
             update,
             context,
-            f"✅ <b>已增加授权</b>\n────────────\n{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
+            f"✅ <b>已添加授权</b>\n────────────\n{html.escape(label)} (<code>{target_uid}</code>)\n变更已保存。",
             authorization_manage_keyboard_for_cfg(
                 is_super_admin_user_id(user_id(update), bot_ctx.cfg)
             ),
@@ -170,6 +216,70 @@ async def handle_fallback_message(
             )
         except Exception as exc:
             log.debug("删除授权输入消息失败：%s", exc)
+        return None
+
+    if user_data_of(context).get("awaiting_speedtest_jump_id"):
+        if not is_allowed(update, cfg):
+            if is_bot_self_update(update, cfg):
+                return
+            user_data_of(context).pop("awaiting_speedtest_jump_id", None)
+            await reply_connection_status(update, cfg)
+            return
+        text = (effective_message.text or "").strip()
+        parsed_label, lookup_target = _parse_test_tool_target(text)
+        if lookup_target is None:
+            await reply_cover_card(
+                update,
+                context,
+                "🤖 <b>添加测试工具</b>\n────────────\n请发送测试工具的 Telegram ID、@用户名 或 t.me 链接；或发送 /start 取消。",
+                InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+            )
+            return
+        target_id: int | None = int(lookup_target) if isinstance(lookup_target, int) else None
+        username = parsed_label if isinstance(lookup_target, str) else None
+        nickname = username or str(target_id)
+        try:
+            chat = await context.bot.get_chat(lookup_target)
+            target_id = int(chat.id)
+            nickname = str(
+                getattr(chat, "full_name", None)
+                or getattr(chat, "title", None)
+                or getattr(chat, "username", None)
+                or username
+                or target_id
+            )
+            username = str(getattr(chat, "username", None) or username or "").lstrip("@") or None
+        except Exception as exc:
+            log.warning("获取测试工具信息失败 target=%s：%s", lookup_target, exc)
+            if username:
+                target_id = _synthetic_telegram_id(username)
+                nickname = username
+            else:
+                await reply_cover_card(
+                    update,
+                    context,
+                    "🤖 <b>添加测试工具</b>\n────────────\n无法通过该 Telegram ID 获取名称；请改用 @用户名 或 t.me 链接添加。",
+                    InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+                )
+                return
+        finally:
+            try:
+                await context_bot_delete_message(
+                    effective_message.chat_id, effective_message.message_id
+                )
+            except Exception as exc:
+                log.debug("删除测试工具输入消息失败：%s", exc)
+        await asyncio.to_thread(
+            speedtest_jump_target_upsert_sync, cache_path, user_id(update), target_id, nickname, username
+        )
+        user_data_of(context).pop("awaiting_speedtest_jump_id", None)
+        id_label = f"@{username}" if target_id < 0 and username else str(target_id)
+        await reply_cover_card(
+            update,
+            context,
+            f"✅ <b>已添加测试工具</b>\n────────────\n{html.escape(nickname)} (<code>{html.escape(id_label)}</code>)",
+            InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+        )
         return None
 
     if user_data_of(context).get("awaiting_custom_cover"):

@@ -184,7 +184,7 @@ def cache_retention_keyboard(
                 )
             ]
         )
-    rows.append(back_close_row("main_menu:parameter_config", "⬅️ 返回参数配置"))
+    rows.append(back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"))
     return InlineKeyboardMarkup(rows)
 
 

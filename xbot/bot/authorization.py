@@ -55,7 +55,7 @@ def auth_user_ids_to_labels(cache_path, value: str) -> str:
 def authorization_manage_keyboard(super_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton("🔐 增加授权", callback_data="main_menu:auth:add"),
+            InlineKeyboardButton("🔐 添加授权", callback_data="main_menu:auth:add"),
             InlineKeyboardButton("🔓 删除授权", callback_data="main_menu:auth:delete"),
         ]
     ]

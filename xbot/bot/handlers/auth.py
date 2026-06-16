@@ -73,7 +73,7 @@ async def auth_callback(
         await answer_callback_silently(query)
         await show_callback_page(
             query,
-            "🔐 <b>增加授权</b>\n────────────\n请输入要授权的 Telegram 用户 ID。",
+            "🔐 <b>添加授权</b>\n────────────\n请输入要授权的 Telegram 用户 ID、@用户名 或 t.me 链接。",
             InlineKeyboardMarkup([back_close_row("main_menu:auth", "⬅️ 返回授权管理")]),
             parse_mode="HTML",
         )

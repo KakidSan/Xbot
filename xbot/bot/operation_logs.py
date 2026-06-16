@@ -29,13 +29,13 @@ OPERATION_LOG_CATEGORIES = {
     "ip_ignore": "IP 忽略调整",
     "reset_cache": "重置缓存",
     "reset_ip": "重置 IP 记录",
-    "parameter_config": "参数配置",
+    "parameter_config": "个人设置",
     "auth": "授权管理",
 }
 
 OPERATION_LOG_ACTION_ICONS = {
     "auth": {
-        "增加授权": "🔐",
+        "添加授权": "🔐",
         "删除授权": "🔓",
         "权限变更": "🎭",
     },
@@ -91,7 +91,7 @@ def operation_logs_menu_keyboard(
         [button("🚧 IP 忽略调整", "ip_ignore")],
         [button("🧹 重置缓存", "reset_cache")],
         [button("👤 重置 IP 记录", "reset_ip")],
-        [button("🎨 参数配置", "parameter_config")],
+        [button("🎨 个人设置", "parameter_config")],
         [button("🔑 授权管理", "auth")],
         [
             InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu"),

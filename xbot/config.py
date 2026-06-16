@@ -65,6 +65,7 @@ class AppConfig:
     redis: RedisConfig
     mysql: MySQLConfig
     cache_path: Path = Path("data/xbot.sqlite3")
+    link_extract_user_id: int = 1
     collector_interval_seconds: float = DEFAULT_COLLECTOR_INTERVAL_SECONDS
     traffic_dashboard_refresh_seconds: float = 60.0
     cache_retention_days: int = DEFAULT_CACHE_RETENTION_DAYS
@@ -92,7 +93,7 @@ def apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     telegram_raw = raw.setdefault("telegram", {})
     redis_raw = raw.setdefault("redis", {})
     mysql_raw = raw.setdefault("mysql", {})
-    raw.setdefault("app", {})
+    app_raw = raw.setdefault("app", {})
 
     telegram_raw["bot_token"] = env_value(
         "TELEGRAM_BOT_TOKEN", telegram_raw.get("bot_token")
@@ -116,6 +117,14 @@ def apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     mysql_raw["database"] = env_value("MYSQL_DATABASE", mysql_raw.get("database"))
     mysql_raw["username"] = env_value("MYSQL_USERNAME", mysql_raw.get("username"))
     mysql_raw["password"] = env_value("MYSQL_PASSWORD", mysql_raw.get("password"))
+
+    # NODE_TEST_USER_ID is accepted only as a backward-compatible fallback for
+    # deployments that adopted the link extraction test account before active
+    # node probing was removed.
+    app_raw["link_extract_user_id"] = env_int(
+        "LINK_EXTRACT_USER_ID",
+        env_int("NODE_TEST_USER_ID", app_raw.get("link_extract_user_id", 1)),
+    )
 
     return raw
 
@@ -179,4 +188,5 @@ def build_config_from_env() -> AppConfig:
         traffic_dashboard_refresh_seconds=60.0,
         cache_retention_days=DEFAULT_CACHE_RETENTION_DAYS,
         ip_geo_queries_per_minute=DEFAULT_IP_GEO_QUERIES_PER_MINUTE,
+        link_extract_user_id=int(app_raw.get("link_extract_user_id") or 1),
     )

@@ -39,5 +39,11 @@ jobs:
               importlib.import_module(name)
           PY
 
-      - name: Run unit tests
-        run: PYTHONPATH=. python -m unittest discover -q -s tests
+      - name: Run unit tests with coverage gate
+        run: |
+          PYTHONPATH=. python -m coverage run \
+            --source=xbot.bot.operation_details,xbot.bot.operation_logs,xbot.bot.formatters,xbot.bot.keyboards \
+            -m unittest discover -q -s tests
+          python -m coverage report \
+            --include='xbot/bot/operation_details.py,xbot/bot/operation_logs.py,xbot/bot/formatters.py,xbot/bot/keyboards.py' \
+            --fail-under=20

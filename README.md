@@ -213,11 +213,31 @@ xbot/
     mysql.py           # XBoard 只读查询
     redis.py           # Heki/Soga 在线 IP 采集
   bot/
-    handlers.py        # Telegram command/callback handlers
+    application.py     # 启动、生命周期、后台任务
+    router.py          # Telegram handler 注册
+    context.py         # BotContext / BotRuntime
+    callback_data.py   # callback pattern / 兼容映射
+    permissions.py     # 权限判断
+    message_utils.py   # 通用消息工具
+    messaging.py       # 运行时消息服务构造
     keyboards.py       # InlineKeyboardMarkup 构造
+    menus.py           # 主菜单/一级菜单键盘
     formatters.py      # 文本渲染
+    handlers/
+      commands.py
+      main_menu.py
+      traffic.py
+      ip_monitor.py
+      alerts.py
+      parameters.py
+      debug.py
+      auth.py
+      operation_logs.py
+      text_input.py
+      version.py
   collector.py         # 定时采集循环
   geo.py               # IP geo 查询 + 缓存
+  node_monitor.py      # 官方订阅链接提取缓存/展示
   alerts.py            # 流量/IP 告警逻辑
   updater.py           # 版本检查 + Docker Compose 后台更新
 ```

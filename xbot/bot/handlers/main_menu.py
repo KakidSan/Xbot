@@ -1,12 +1,36 @@
 from __future__ import annotations
 
-from ...common import BadRequest, ContextTypes, NOTIFICATION_KINDS, Path, Update, asyncio, html, is_admin_user_id, log, re, timedelta
+from ...common import (
+    BadRequest,
+    ContextTypes,
+    NOTIFICATION_KINDS,
+    Path,
+    Message,
+    Update,
+    asyncio,
+    html,
+    is_admin_user_id,
+    log,
+    re,
+    timedelta,
+)
 from ...config import AppConfig
-from ...db.cache import initialization_acknowledge_sync, list_user_ips_from_cache_sync, notification_toggle_sync, ui_pref_get_sync
+from ...db.cache import (
+    initialization_acknowledge_sync,
+    list_user_ips_from_cache_sync,
+    notification_toggle_sync,
+    ui_pref_get_sync,
+)
 from ..context import BotContext
 from ..formatters import bot_health_overview_text_sync, notification_ip_alert_mode_label
 from ..keyboards import active_users_keyboard, notification_push_keyboard
-from ..menus import clear_history_confirm_keyboard, empty_section_keyboard, health_check_keyboard, main_menu_keyboard, traffic_management_keyboard
+from ..menus import (
+    clear_history_confirm_keyboard,
+    empty_section_keyboard,
+    health_check_keyboard,
+    main_menu_keyboard,
+    traffic_management_keyboard,
+)
 from .auth import auth_callback
 from .debug import debug_callback
 from .ip_monitor import ip_monitor_callback
@@ -15,15 +39,35 @@ from .operation_logs import operation_logs_callback
 from .parameters import parameter_callback
 
 
-async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, bot_ctx: BotContext, cache_path: Path, cache_retention_text_sync, cache_retention_preview_text, show_initialization_gate, answer_callback_silently, show_callback_page, send_start_menu, open_dashboard_card, purge_chat_history, resolve_telegram_user_label, reply_long_text, send_or_jump_traffic_dashboard, traffic_custom_state, traffic_custom_prompt_text) -> None:
+async def handle_main_menu_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    bot_ctx: BotContext,
+    cache_path: Path,
+    cache_retention_text_sync,
+    cache_retention_preview_text,
+    show_initialization_gate,
+    answer_callback_silently,
+    show_callback_page,
+    send_start_menu,
+    open_dashboard_card,
+    purge_chat_history,
+    resolve_telegram_user_label,
+    reply_long_text,
+    send_or_jump_traffic_dashboard,
+    traffic_custom_state,
+    traffic_custom_prompt_text,
+) -> None:
     query = update.callback_query
     if not query or not query.message:
-        return
+        return None
     if not is_allowed(update, cfg):
         if is_bot_self_update(update, cfg):
             return
         await query.answer("未授权，无法使用该功能", show_alert=True)
-        return
+        return None
     data = query.data or ""
     if data == "main_menu:init_ack":
         await asyncio.to_thread(initialization_acknowledge_sync, cache_path)
@@ -33,11 +77,12 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                 await query.message.delete()
             except Exception as exc:
                 log.warning("删除初始化确认消息失败，继续发送主菜单：%s", exc)
-            update._effective_message = query.message
-            await send_start_menu(update, context)
-        return
+            if isinstance(query.message, Message):
+                update._effective_message = query.message
+                await send_start_menu(update, context)
+        return None
     elif await show_initialization_gate(query):
-        return
+        return None
 
     sections = {
         "main_menu:status_notice": "💬 通知推送",
@@ -47,39 +92,52 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
     if data == "main_menu":
         await answer_callback_silently(query)
         user = query.from_user
-        custom_name = await asyncio.to_thread(ui_pref_get_sync, cache_path, user.id, "nickname")
-        tg_name = html.escape(str(custom_name or user.full_name or user.username or user.id))
+        custom_name = await asyncio.to_thread(
+            ui_pref_get_sync, cache_path, user.id, "nickname"
+        )
+        tg_name = html.escape(
+            str(custom_name or user.full_name or user.username or user.id)
+        )
         is_admin = is_admin_user_id(user.id, cfg)
         role_emoji = "👑" if is_admin else "🎩"
-        await show_callback_page(query, f"{role_emoji} {tg_name}，<b>请选择功能</b>", main_menu_keyboard(is_admin), parse_mode="HTML")
-        return
+        await show_callback_page(
+            query,
+            f"{role_emoji} {tg_name}，<b>请选择功能</b>",
+            main_menu_keyboard(is_admin),
+            parse_mode="HTML",
+        )
+        return None
 
-    if (await operation_logs_callback(
-        update,
-        context,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        data=data,
-        query=query,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-    )) is not False:
-        return
+    if (
+        await operation_logs_callback(
+            update,
+            context,
+            cfg=cfg,
+            bot_ctx=bot_ctx,
+            cache_path=cache_path,
+            data=data,
+            query=query,
+            answer_callback_silently=answer_callback_silently,
+            show_callback_page=show_callback_page,
+        )
+    ) is not False:
+        return None
 
-    if (await auth_callback(
-        update,
-        context,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        data=data,
-        query=query,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-        resolve_telegram_user_label=resolve_telegram_user_label,
-    )) is not False:
-        return
+    if (
+        await auth_callback(
+            update,
+            context,
+            cfg=cfg,
+            bot_ctx=bot_ctx,
+            cache_path=cache_path,
+            data=data,
+            query=query,
+            answer_callback_silently=answer_callback_silently,
+            show_callback_page=show_callback_page,
+            resolve_telegram_user_label=resolve_telegram_user_label,
+        )
+    ) is not False:
+        return None
 
     if data == "main_menu:clear_history":
         await answer_callback_silently(query)
@@ -90,31 +148,53 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             parse_mode="HTML",
             auto_delete=False,
         )
-        return
+        return None
 
     if data == "main_menu:clear_history_confirm":
-        chat_id = query.message.chat_id
-        message_id = query.message.message_id
+        chat_id = (
+            query.message.chat_id
+            if query.message and hasattr(query.message, "chat_id")
+            else None
+        )
+        message_id = query.message.message_id if query.message else None
         await query.answer("正在后台清空历史记录，请稍候...")
-        log.info("开始后台清空 Telegram 历史记录：chat=%s from_message_id=%s", chat_id, message_id)
+        log.info(
+            "开始后台清空 Telegram 历史记录：chat=%s from_message_id=%s",
+            chat_id,
+            message_id,
+        )
 
         async def purge_chat_history_background() -> None:
             try:
                 deleted, failed = await purge_chat_history(chat_id, message_id)
-                log.info("后台清空 Telegram 历史记录完成：chat=%s deleted=%s failed=%s", chat_id, deleted, failed)
+                log.info(
+                    "后台清空 Telegram 历史记录完成：chat=%s deleted=%s failed=%s",
+                    chat_id,
+                    deleted,
+                    failed,
+                )
             except Exception as exc:
-                log.exception("后台清空 Telegram 历史记录失败：chat=%s error=%s", chat_id, exc)
+                log.exception(
+                    "后台清空 Telegram 历史记录失败：chat=%s error=%s", chat_id, exc
+                )
 
         context.application.create_task(purge_chat_history_background())
-        return
+        return None
 
     if data in {"main_menu:system_check", "main_menu:system_check_refresh"}:
         is_refresh = data.endswith("_refresh")
         if not is_refresh:
             await query.answer("正在执行健康检查，请稍候...")
-        text = await asyncio.to_thread(bot_health_overview_text_sync, cfg, cache_path, is_admin_user_id(query.from_user.id, cfg))
+        text = await asyncio.to_thread(
+            bot_health_overview_text_sync,
+            cfg,
+            cache_path,
+            is_admin_user_id(query.from_user.id, cfg),
+        )
         if len(text) <= 3900:
-            await show_callback_page(query, text, health_check_keyboard(), parse_mode="HTML")
+            await show_callback_page(
+                query, text, health_check_keyboard(), parse_mode="HTML"
+            )
         else:
             await show_callback_page(
                 query,
@@ -122,42 +202,66 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                 health_check_keyboard(),
                 parse_mode="HTML",
             )
-            await reply_long_text(query.message, text, parse_mode="HTML", reply_markup=health_check_keyboard())
+            await reply_long_text(
+                query.message,
+                text,
+                parse_mode="HTML",
+                reply_markup=health_check_keyboard(),
+            )
         if is_refresh:
             await query.answer("刷新成功")
-        return
+        return None
 
     if data in {"main_menu:notifications", "main_menu:status_notice"}:
         await answer_callback_silently(query)
-        chat_id = str(query.message.chat_id)
+        chat_id = (
+            str(query.message.chat_id)
+            if query.message and hasattr(query.message, "chat_id")
+            else ""
+        )
         await show_callback_page(
             query,
             "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-            notification_push_keyboard(bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)),
+            notification_push_keyboard(
+                bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)
+            ),
             parse_mode="HTML",
         )
-        return
+        return None
 
-    notification_match = re.fullmatch(r"main_menu:notifications:(daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update)", data)
+    notification_match = re.fullmatch(
+        r"main_menu:notifications:(daily|weekly|monthly|collector|traffic_alert|ip_alert|version_update)",
+        data,
+    )
     if notification_match:
         kind = notification_match.group(1)
         if kind == "version_update" and not is_admin_user_id(query.from_user.id, cfg):
             await query.answer("只有管理员可以设置版本更新推送", show_alert=True)
             return
-        chat_id = str(query.message.chat_id)
-        result = await asyncio.to_thread(notification_toggle_sync, cache_path, chat_id, kind)
+        chat_id = (
+            str(query.message.chat_id)
+            if query.message and hasattr(query.message, "chat_id")
+            else ""
+        )
+        result = await asyncio.to_thread(
+            notification_toggle_sync, cache_path, chat_id, kind
+        )
         label = NOTIFICATION_KINDS[kind]
         if kind == "ip_alert":
-            await query.answer(f"异地登录已切换为{notification_ip_alert_mode_label(str(result))}通知")
+            await query.answer(
+                f"异地登录已切换为{notification_ip_alert_mode_label(str(result))}通知"
+            )
         else:
             await query.answer(f"{label}已{'开启' if result else '关闭'}推送")
         await show_callback_page(
             query,
             "💬 <b>通知推送</b>\n────────────\n流量报表生成时间：北京时间 00:00\n版本更新检查时间：北京时间 12:00\n\n",
-            notification_push_keyboard(bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)),
+            notification_push_keyboard(
+                bot_ctx.cache_path, chat_id, is_admin_user_id(query.from_user.id, cfg)
+            ),
             parse_mode="HTML",
         )
-        return
+        return None
 
     if data == "main_menu:traffic_management":
         await answer_callback_silently(query)
@@ -167,78 +271,91 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             traffic_management_keyboard(),
             parse_mode="HTML",
         )
-        return
+        return None
 
     if data == "main_menu:traffic_users":
         await query.answer("正在统计用户用量，请稍候...")
         await send_or_jump_traffic_dashboard(query.message, "users_preset_24h")
-        return
+        return None
 
     if data == "main_menu:traffic_nodes":
         await query.answer("正在统计节点用量，请稍候...")
         await send_or_jump_traffic_dashboard(query.message, "nodes_preset_24h")
-        return
+        return None
 
-    if (await ip_monitor_callback(
-        update,
-        context,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        data=data,
-        query=query,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-        open_dashboard_card=open_dashboard_card,
-    )) is not False:
-        return
+    if (
+        await ip_monitor_callback(
+            update,
+            context,
+            cfg=cfg,
+            bot_ctx=bot_ctx,
+            cache_path=cache_path,
+            data=data,
+            query=query,
+            answer_callback_silently=answer_callback_silently,
+            show_callback_page=show_callback_page,
+            open_dashboard_card=open_dashboard_card,
+        )
+    ) is not False:
+        return None
 
-    if (await parameter_callback(
-        update,
-        context,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        data=data,
-        query=query,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-        cache_retention_text_sync=cache_retention_text_sync,
-        cache_retention_preview_text=cache_retention_preview_text,
-    )) is not False:
-        return
+    if (
+        await parameter_callback(
+            update,
+            context,
+            cfg=cfg,
+            bot_ctx=bot_ctx,
+            cache_path=cache_path,
+            data=data,
+            query=query,
+            answer_callback_silently=answer_callback_silently,
+            show_callback_page=show_callback_page,
+            cache_retention_text_sync=cache_retention_text_sync,
+            cache_retention_preview_text=cache_retention_preview_text,
+        )
+    ) is not False:
+        return None
 
-    if (await debug_callback(
-        update,
-        context,
-        cfg=cfg,
-        bot_ctx=bot_ctx,
-        cache_path=cache_path,
-        data=data,
-        query=query,
-        answer_callback_silently=answer_callback_silently,
-        show_callback_page=show_callback_page,
-        traffic_custom_state=traffic_custom_state,
-        traffic_custom_prompt_text=traffic_custom_prompt_text,
-    )) is not False:
-        return
+    if (
+        await debug_callback(
+            update,
+            context,
+            cfg=cfg,
+            bot_ctx=bot_ctx,
+            cache_path=cache_path,
+            data=data,
+            query=query,
+            answer_callback_silently=answer_callback_silently,
+            show_callback_page=show_callback_page,
+            traffic_custom_state=traffic_custom_state,
+            traffic_custom_prompt_text=traffic_custom_prompt_text,
+        )
+    ) is not False:
+        return None
 
     if data in sections:
         await answer_callback_silently(query)
-        await show_callback_page(query, f"{sections[data]}\n\n此功能入口已预留，等待下一步配置。", empty_section_keyboard())
-        return
+        await show_callback_page(
+            query,
+            f"{sections[data]}\n\n此功能入口已预留，等待下一步配置。",
+            empty_section_keyboard(),
+        )
+        return None
 
     await query.answer("该入口暂未开放", show_alert=True)
 
-async def handle_close_message_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig) -> None:
+
+async def handle_close_message_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig
+) -> None:
     query = update.callback_query
     if not query or not query.message:
-        return
+        return None
     if not is_allowed(update, cfg):
         if is_bot_self_update(update, cfg):
             return
         await query.answer("未授权", show_alert=True)
-        return
+        return None
     await query.answer("已关闭")
     try:
         if hasattr(query.message, "delete"):
@@ -246,15 +363,24 @@ async def handle_close_message_callback(update: Update, context: ContextTypes.DE
     except BadRequest:
         pass
 
-async def handle_detail_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, answer_callback_silently, show_callback_page) -> None:
+
+async def handle_detail_back_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    cache_path: Path,
+    answer_callback_silently,
+    show_callback_page,
+) -> None:
     query = update.callback_query
     if not query or not query.message:
-        return
+        return None
     if not is_allowed(update, cfg):
         if is_bot_self_update(update, cfg):
             return
         await query.answer("未授权", show_alert=True)
-        return
+        return None
     periods = {
         "1h": ("近 1 小时", timedelta(hours=1)),
         "24h": ("近 24 小时", timedelta(hours=24)),
@@ -265,7 +391,13 @@ async def handle_detail_back_callback(update: Update, context: ContextTypes.DEFA
     await answer_callback_silently(query)
     if target in periods:
         label, window = periods[target]
-        result = await asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window)
-        await show_callback_page(query, result, active_users_keyboard(target), parse_mode="HTML")
-        return
-    await show_callback_page(query, "🌐 请选择在线记录统计周期：", active_users_keyboard())
+        result = await asyncio.to_thread(
+            list_user_ips_from_cache_sync, cache_path, label, window
+        )
+        await show_callback_page(
+            query, result, active_users_keyboard(target), parse_mode="HTML"
+        )
+        return None
+    await show_callback_page(
+        query, "🌐 请选择在线记录统计周期：", active_users_keyboard()
+    )

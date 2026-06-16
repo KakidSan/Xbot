@@ -6,10 +6,10 @@ from ...common import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Path,
+    Message,
     Update,
     asyncio,
     datetime,
-    field,
     ip_range_kind,
     re,
     timedelta,
@@ -31,7 +31,7 @@ from ...db.cache import (
     traffic_kind_for_dimension,
     list_user_ips_from_cache_sync,
 )
-from ..context import BotContext
+from ..context import BotContext, user_data_of
 from ..keyboards import (
     active_users_keyboard,
     detail_keyboard,
@@ -43,23 +43,40 @@ from ..keyboards import (
     user_ip_query_page_keyboard,
 )
 from ..menus import back_close_row
-from ..messaging import traffic_custom_enter_initial_step, traffic_fixed_range
-from ..operation_logs import log_operation_from_query as log_operation_from_query_with_cache
+from ..messaging import (
+    traffic_custom_enter_initial_step,
+    traffic_custom_prompt_text,
+    traffic_custom_state,
+    traffic_fixed_range,
+)
+from ..operation_logs import (
+    log_operation_from_query as log_operation_from_query_with_cache,
+)
 from ...db.cache import make_range_kind
 from ..permissions import is_allowed, is_bot_self_update
 
 
-async def handle_active_users_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, cache_path: Path, show_initialization_gate, answer_callback_silently, show_callback_page, open_dashboard_card) -> None:
+async def handle_active_users_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    cache_path: Path,
+    show_initialization_gate,
+    answer_callback_silently,
+    show_callback_page,
+    open_dashboard_card,
+) -> None:
     query = update.callback_query
     if not query or not query.message:
-        return
+        return None
     if not is_allowed(update, cfg):
         if is_bot_self_update(update, cfg):
             return
         await query.answer("未授权", show_alert=True)
-        return
+        return None
     if await show_initialization_gate(query):
-        return
+        return None
 
     periods = {
         "1h": ("近 1 小时", timedelta(hours=1)),
@@ -69,24 +86,30 @@ async def handle_active_users_callback(update: Update, context: ContextTypes.DEF
     }
     data = query.data or ""
 
-    scoped_query_match = re.fullmatch(r"ip_user_query:(?:(1h|24h|7d|30d)|custom:(\d+):(\d+))", data)
+    scoped_query_match = re.fullmatch(
+        r"ip_user_query:(?:(1h|24h|7d|30d)|custom:(\d+):(\d+))", data
+    )
     if scoped_query_match:
         period_key = scoped_query_match.group(1)
-        context.user_data["awaiting_user_ip_query_id"] = True
+        user_data_of(context)["awaiting_user_ip_query_id"] = True
         if period_key:
-            context.user_data["user_ip_query_period"] = period_key
+            user_data_of(context)["user_ip_query_period"] = period_key
         else:
             start_ts = int(scoped_query_match.group(2))
             end_ts = int(scoped_query_match.group(3))
-            context.user_data["user_ip_query_period"] = f"custom:{start_ts}:{end_ts}"
+            user_data_of(context)["user_ip_query_period"] = (
+                f"custom:{start_ts}:{end_ts}"
+            )
         await answer_callback_silently(query)
         await show_callback_page(
             query,
             "🔎 <b>按用户 ID 查询 IP</b>\n────────────\n请输入要查询的用户 ID，例如：1",
-            InlineKeyboardMarkup([back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控")]),
+            InlineKeyboardMarkup(
+                [back_close_row("main_menu:ip_monitor", "⬅️ 返回 IP 监控")]
+            ),
             parse_mode="HTML",
         )
-        return
+        return None
 
     query_match = re.fullmatch(r"active_users_query:(1h|24h|7d|30d)(?::(\d+))?", data)
     if query_match:
@@ -96,7 +119,9 @@ async def handle_active_users_callback(update: Update, context: ContextTypes.DEF
         await query.answer("正在生成用户按钮，请稍候...")
         result, user_buttons = await asyncio.gather(
             asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window),
-            asyncio.to_thread(active_user_button_items_from_cache_sync, cache_path, window),
+            asyncio.to_thread(
+                active_user_button_items_from_cache_sync, cache_path, window
+            ),
         )
         await show_callback_page(
             query,
@@ -104,7 +129,7 @@ async def handle_active_users_callback(update: Update, context: ContextTypes.DEF
             active_users_keyboard(period_key, user_buttons, page),
             parse_mode="HTML",
         )
-        return
+        return None
 
     page_match = re.fullmatch(r"user_ip_page:(\d+):(\d+):(.+)", data)
     if page_match:
@@ -112,32 +137,61 @@ async def handle_active_users_callback(update: Update, context: ContextTypes.DEF
         page = int(page_match.group(2))
         period_spec = page_match.group(3)
         period_key = None if period_spec == "all" else period_spec
-        label = window = start_ts = end_ts = None
+        page_label: str | None = None
+        page_window: timedelta | None = None
+        page_start_ts: int | None = None
+        page_end_ts: int | None = None
         if period_key in periods:
-            label, window = periods[period_key]
+            page_label, page_window = periods[period_key]
         elif period_key and period_key.startswith("custom:"):
             _, start_text, end_text = period_key.split(":", 2)
-            start_ts = int(start_text)
-            end_ts = int(end_text)
-            label = "自定区间"
+            page_start_ts = int(start_text)
+            page_end_ts = int(end_text)
+            page_label = "自定区间"
         await query.answer("正在翻页，请稍候...")
-        result = await asyncio.to_thread(query_user_ips_from_cache_sync, cache_path, xboard_user_id, label, window, start_ts, end_ts, page, 10)
-        total_ips = await asyncio.to_thread(count_user_ips_from_cache_sync, cache_path, xboard_user_id, window, start_ts, end_ts)
-        await show_callback_page(query, result, user_ip_query_page_keyboard(period_key, xboard_user_id, total_ips, page), parse_mode="HTML")
-        return
+        result = await asyncio.to_thread(
+            query_user_ips_from_cache_sync,
+            cache_path,
+            xboard_user_id,
+            page_label,
+            page_window,
+            page_start_ts,
+            page_end_ts,
+            page,
+            10,
+        )
+        total_ips = await asyncio.to_thread(
+            count_user_ips_from_cache_sync,
+            cache_path,
+            xboard_user_id,
+            window,
+            start_ts,
+            end_ts,
+        )
+        await show_callback_page(
+            query,
+            result,
+            user_ip_query_page_keyboard(period_key, xboard_user_id, total_ips, page),
+            parse_mode="HTML",
+        )
+        return None
 
     cancel_match = re.fullmatch(r"active_users_cancel:(1h|24h|7d|30d)", data)
     if cancel_match:
         period_key = cancel_match.group(1)
         label, window = periods[period_key]
         await query.answer("已取消")
-        result = await asyncio.to_thread(list_user_ips_from_cache_sync, cache_path, label, window)
-        await show_callback_page(query, result, active_users_keyboard(period_key), parse_mode="HTML")
-        return
+        result = await asyncio.to_thread(
+            list_user_ips_from_cache_sync, cache_path, label, window
+        )
+        await show_callback_page(
+            query, result, active_users_keyboard(period_key), parse_mode="HTML"
+        )
+        return None
 
     if data == "noop":
         await answer_callback_silently(query)
-        return
+        return None
 
     detail_match = re.fullmatch(r"active_user_detail:(1h|24h|7d|30d):(\d+)", data)
     if detail_match:
@@ -152,28 +206,45 @@ async def handle_active_users_callback(update: Update, context: ContextTypes.DEF
             label,
             window,
         )
-        await show_callback_page(query, result, detail_keyboard(period_key), parse_mode="HTML")
-        return
+        await show_callback_page(
+            query, result, detail_keyboard(period_key), parse_mode="HTML"
+        )
+        return None
 
     key = data.split(":", 1)[-1]
     if key not in periods:
         await query.answer("请求无效，请重新进入。", show_alert=True)
-        return
+        return None
 
     await query.answer("正在生成查询，请稍候...")
     await open_dashboard_card(query, f"ip_{key}")
 
-async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cfg: AppConfig, bot_ctx: BotContext, cache_path: Path, show_initialization_gate, answer_callback_silently, show_callback_page, send_dashboard_card, edit_dashboard_card, open_traffic_dashboard_message, switch_traffic_dashboard_message) -> None:
+
+async def handle_traffic_daily_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    cfg: AppConfig,
+    bot_ctx: BotContext,
+    cache_path: Path,
+    show_initialization_gate,
+    answer_callback_silently,
+    show_callback_page,
+    send_dashboard_card,
+    edit_dashboard_card,
+    open_traffic_dashboard_message,
+    switch_traffic_dashboard_message,
+) -> None:
     query = update.callback_query
     if not query or not query.message:
-        return
+        return None
     if not is_allowed(update, cfg):
         if is_bot_self_update(update, cfg):
             return
         await query.answer("未授权", show_alert=True)
-        return
+        return None
     if await show_initialization_gate(query):
-        return
+        return None
     data = query.data or ""
 
     menu_match = re.fullmatch(r"traffic_menu(?::([A-Za-z0-9_]+))?", data)
@@ -181,21 +252,30 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         source_kind = menu_match.group(1)
         dimension = traffic_dimension_from_kind(source_kind or "combined")
         await answer_callback_silently(query)
-        await show_callback_page(query, "🌊 请选择统计周期：", traffic_period_keyboard(dimension, source_kind))
-        return
+        await show_callback_page(
+            query,
+            "🌊 请选择统计周期：",
+            traffic_period_keyboard(dimension, source_kind),
+        )
+        return None
 
     back_match = re.fullmatch(r"traffic_back:([A-Za-z0-9_]+)", data)
     if back_match:
         await answer_callback_silently(query)
         await edit_dashboard_card(query, back_match.group(1))
-        return
+        return None
 
-    period_match = re.fullmatch(r"traffic_period:(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(users|nodes))?", data)
+    period_match = re.fullmatch(
+        r"traffic_period:(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month)(?::(users|nodes))?",
+        data,
+    )
     if period_match:
         selected = period_match.group(1)
         dimension = period_match.group(2) or "combined"
         if selected.startswith("preset_"):
-            await open_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, selected))
+            await open_traffic_dashboard_message(
+                query, traffic_kind_for_dimension(dimension, selected)
+            )
             return
         fixed = traffic_fixed_range(selected)
         if not fixed:
@@ -203,16 +283,25 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             return
         start_ts, end_ts, label = fixed
         base_kind = make_range_kind(start_ts, end_ts, label)
-        await asyncio.to_thread(save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label)
-        await open_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, base_kind))
-        return
+        await asyncio.to_thread(
+            save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label
+        )
+        await open_traffic_dashboard_message(
+            query, traffic_kind_for_dimension(dimension, base_kind)
+        )
+        return None
 
-    switch_match = re.fullmatch(r"traffic_switch:(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month):(users|nodes)", data)
+    switch_match = re.fullmatch(
+        r"traffic_switch:(preset_1h|preset_24h|preset_7d|preset_30d|today|yesterday|this_week|this_month):(users|nodes)",
+        data,
+    )
     if switch_match:
         selected = switch_match.group(1)
         dimension = switch_match.group(2)
         if selected.startswith("preset_"):
-            await switch_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, selected))
+            await switch_traffic_dashboard_message(
+                query, traffic_kind_for_dimension(dimension, selected)
+            )
             return
         fixed = traffic_fixed_range(selected)
         if not fixed:
@@ -220,9 +309,13 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             return
         start_ts, end_ts, label = fixed
         base_kind = make_range_kind(start_ts, end_ts, label)
-        await asyncio.to_thread(save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label)
-        await switch_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, base_kind))
-        return
+        await asyncio.to_thread(
+            save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label
+        )
+        await switch_traffic_dashboard_message(
+            query, traffic_kind_for_dimension(dimension, base_kind)
+        )
+        return None
 
     if data == "ip_custom:start":
         state = traffic_custom_state(context)
@@ -230,10 +323,16 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state.update({"mode": "ip_custom", "phase": "start"})
         traffic_custom_enter_initial_step(cache_path, state)
         await answer_callback_silently(query)
-        await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
-        return
+        await show_callback_page(
+            query,
+            traffic_custom_prompt_text(cache_path, state),
+            traffic_custom_keyboard_for_state(cache_path, state),
+        )
+        return None
 
-    traffic_custom_start_match = re.fullmatch(r"traffic_custom:start(?::(combined|users|nodes))?", data)
+    traffic_custom_start_match = re.fullmatch(
+        r"traffic_custom:start(?::(combined|users|nodes))?", data
+    )
     if traffic_custom_start_match:
         dimension = traffic_custom_start_match.group(1) or "combined"
         state = traffic_custom_state(context)
@@ -241,24 +340,41 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state.update({"mode": "custom", "dimension": dimension, "phase": "start"})
         traffic_custom_enter_initial_step(cache_path, state)
         await answer_callback_silently(query)
-        await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
-        return
+        await show_callback_page(
+            query,
+            traffic_custom_prompt_text(cache_path, state),
+            traffic_custom_keyboard_for_state(cache_path, state),
+        )
+        return None
 
     if data == "traffic_floor:start":
         state = traffic_custom_state(context)
         state.clear()
         state.update({"mode": "floor", "phase": "floor", "step": "year"})
         await answer_callback_silently(query)
-        await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_year_keyboard(cache_path, str(state.get("mode") or "")))
-        return
+        await show_callback_page(
+            query,
+            traffic_custom_prompt_text(cache_path, state),
+            traffic_custom_year_keyboard(cache_path, str(state.get("mode") or "")),
+        )
+        return None
 
     floor_confirm_match = re.fullmatch(r"traffic_floor:confirm:(\d+)", data)
     if floor_confirm_match:
         floor_ts = int(floor_confirm_match.group(1))
-        was_debug_reset = bool(context.user_data.get("traffic_custom", {}).get("debug"))
+        was_debug_reset = bool(
+            user_data_of(context).get("traffic_custom", {}).get("debug")
+        )
         counts = await asyncio.to_thread(prune_stats_before_sync, cache_path, floor_ts)
-        await asyncio.to_thread(log_operation_from_query_with_cache, bot_ctx.cache_path, query, "reset_cache", "调整统计起始点", f"{format_timestamp(floor_ts)}，流量样本 {counts['traffic_delta_samples']} 条")
-        context.user_data.pop("traffic_custom", None)
+        await asyncio.to_thread(
+            log_operation_from_query_with_cache,
+            bot_ctx.cache_path,
+            query,
+            "reset_cache",
+            "调整统计起始点",
+            f"{format_timestamp(floor_ts)}，流量样本 {counts['traffic_delta_samples']} 条",
+        )
+        user_data_of(context).pop("traffic_custom", None)
         await query.answer("统计起始点已重置")
         text = (
             "✅ 起始点调整完成\n\n"
@@ -273,14 +389,21 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             await show_callback_page(
                 query,
                 text + "\n\n请进入健康检查页，观察重新采集与采样情况。",
-                InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🩺 前往健康检查", callback_data="main_menu:system_check")],
-                    back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"),
-                ]),
+                InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "🩺 前往健康检查",
+                                callback_data="main_menu:system_check",
+                            )
+                        ],
+                        back_close_row("main_menu:debug_tools", "⬅️ 返回调试功能"),
+                    ]
+                ),
             )
         else:
             await show_callback_page(query, text, traffic_period_keyboard())
-        return
+        return None
 
     if data == "traffic_custom:now":
         state = traffic_custom_state(context)
@@ -298,24 +421,41 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state.clear()
         if mode == "ip_custom":
             await query.answer("正在生成查询，请稍候...")
-            await send_dashboard_card(query.message, ip_range_kind(start_ts, end_ts), query.from_user.id)
+            await send_dashboard_card(
+                query.message, ip_range_kind(start_ts, end_ts), query.from_user.id
+            )
             return
         base_kind = make_range_kind(start_ts, end_ts, label)
-        await asyncio.to_thread(save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label)
-        await open_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, base_kind))
-        return
+        await asyncio.to_thread(
+            save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label
+        )
+        await open_traffic_dashboard_message(
+            query, traffic_kind_for_dimension(dimension, base_kind)
+        )
+        return None
 
-    custom_match = re.fullmatch(r"traffic_custom:(year|month|day|hour|minute):(\d+)", data)
+    custom_match = re.fullmatch(
+        r"traffic_custom:(year|month|day|hour|minute):(\d+)", data
+    )
     if custom_match:
         field = custom_match.group(1)
         value = int(custom_match.group(2))
         state = traffic_custom_state(context)
         state[field] = value
-        next_step = {"year": "month", "month": "day", "day": "hour", "hour": "minute"}.get(field)
+        next_step = {
+            "year": "month",
+            "month": "day",
+            "day": "hour",
+            "hour": "minute",
+        }.get(field)
         if next_step:
             state["step"] = next_step
             await answer_callback_silently(query)
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
+            await show_callback_page(
+                query,
+                traffic_custom_prompt_text(cache_path, state),
+                traffic_custom_keyboard_for_state(cache_path, state),
+            )
             return
 
         year = int(state.get("year") or 0)
@@ -327,7 +467,9 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         second = 0 if phase in {"start", "floor"} else 59
         selected_ts = int(datetime(year, month, day, hour, minute, second).timestamp())
         if state.get("mode") == "floor":
-            preview = await asyncio.to_thread(preview_prune_stats_before_sync, cache_path, selected_ts)
+            preview = await asyncio.to_thread(
+                preview_prune_stats_before_sync, cache_path, selected_ts
+            )
             await answer_callback_silently(query)
             await show_callback_page(
                 query,
@@ -349,7 +491,11 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             state.update({"phase": "end"})
             traffic_custom_enter_initial_step(cache_path, state)
             await query.answer("开始时间已选择")
-            await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
+            await show_callback_page(
+                query,
+                traffic_custom_prompt_text(cache_path, state),
+                traffic_custom_keyboard_for_state(cache_path, state),
+            )
             return
         state["end_ts"] = selected_ts
         start_ts = int(state.get("start_ts") or 0)
@@ -363,12 +509,18 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
         state.clear()
         if mode == "ip_custom":
             await query.answer("正在生成查询，请稍候...")
-            await send_dashboard_card(query.message, ip_range_kind(start_ts, end_ts), query.from_user.id)
+            await send_dashboard_card(
+                query.message, ip_range_kind(start_ts, end_ts), query.from_user.id
+            )
             return
         base_kind = make_range_kind(start_ts, end_ts, label)
-        await asyncio.to_thread(save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label)
-        await open_traffic_dashboard_message(query, traffic_kind_for_dimension(dimension, base_kind))
-        return
+        await asyncio.to_thread(
+            save_traffic_range_sync, cache_path, base_kind, start_ts, end_ts, label
+        )
+        await open_traffic_dashboard_message(
+            query, traffic_kind_for_dimension(dimension, base_kind)
+        )
+        return None
 
     back_match = re.fullmatch(r"traffic_custom:back:(year|month|day|hour)", data)
     if back_match:
@@ -384,46 +536,89 @@ async def handle_traffic_daily_callback(update: Update, context: ContextTypes.DE
             state.pop(key, None)
         state["step"] = target
         await answer_callback_silently(query)
-        await show_callback_page(query, traffic_custom_prompt_text(state), traffic_custom_keyboard_for_state(cache_path, state))
-        return
+        await show_callback_page(
+            query,
+            traffic_custom_prompt_text(cache_path, state),
+            traffic_custom_keyboard_for_state(cache_path, state),
+        )
+        return None
 
     match = re.fullmatch(r"traffic_dashboard:(pin|unpin|delete):([A-Za-z0-9_]+)", data)
     if not match:
         await query.answer("请求无效，请重新进入。", show_alert=True)
-        return
+        return None
     action, kind = match.group(1), match.group(2)
-    chat_id = str(query.message.chat_id)
+    message = query.message
+    if not isinstance(message, Message):
+        await query.answer("原消息不可访问，请重新进入。", show_alert=True)
+        return None
+    chat_id = str(message.chat_id)
 
     if action == "pin":
         try:
-            await query.message.pin(disable_notification=True)
+            await message.pin(disable_notification=True)
         except BadRequest as exc:
             await query.answer(f"置顶失败：{exc.message}", show_alert=True)
             return
-        await asyncio.to_thread(pinned_dashboard_set_sync, cache_path, kind, chat_id, query.message.message_id, True)
-        await asyncio.to_thread(auto_delete_message_set_sync, cache_path, chat_id, query.message.message_id, True)
+        await asyncio.to_thread(
+            pinned_dashboard_set_sync,
+            cache_path,
+            kind,
+            chat_id,
+            message.message_id,
+            True,
+        )
+        await asyncio.to_thread(
+            auto_delete_message_set_sync,
+            cache_path,
+            chat_id,
+            message.message_id,
+            True,
+        )
         await query.answer("已置顶")
-        await query.message.edit_reply_markup(reply_markup=traffic_dashboard_keyboard(kind, is_pinned=True))
-        return
+        await message.edit_reply_markup(
+            reply_markup=traffic_dashboard_keyboard(kind, is_pinned=True)
+        )
+        return None
 
     if action == "unpin":
         try:
-            await query.message.unpin()
+            await message.unpin()
         except BadRequest as exc:
             await query.answer(f"取消置顶失败：{exc.message}", show_alert=True)
             return
-        await asyncio.to_thread(pinned_dashboard_set_sync, cache_path, kind, chat_id, query.message.message_id, False)
-        await asyncio.to_thread(auto_delete_message_set_sync, cache_path, chat_id, query.message.message_id, False)
+        await asyncio.to_thread(
+            pinned_dashboard_set_sync,
+            cache_path,
+            kind,
+            chat_id,
+            message.message_id,
+            False,
+        )
+        await asyncio.to_thread(
+            auto_delete_message_set_sync,
+            cache_path,
+            chat_id,
+            message.message_id,
+            False,
+        )
         await query.answer("已取消置顶")
-        await query.message.edit_reply_markup(reply_markup=traffic_dashboard_keyboard(kind, is_pinned=False))
-        return
+        await message.edit_reply_markup(
+            reply_markup=traffic_dashboard_keyboard(kind, is_pinned=False)
+        )
+        return None
 
     if action == "delete":
         await asyncio.to_thread(pinned_dashboard_delete_sync, cache_path, kind, chat_id)
-        await asyncio.to_thread(auto_delete_message_delete_sync, cache_path, chat_id, query.message.message_id)
+        await asyncio.to_thread(
+            auto_delete_message_delete_sync,
+            cache_path,
+            chat_id,
+            message.message_id,
+        )
         await query.answer("已删除")
         try:
-            await query.message.delete()
+            await message.delete()
         except BadRequest:
             pass
-        return
+        return None

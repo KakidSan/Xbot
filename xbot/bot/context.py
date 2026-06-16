@@ -56,3 +56,9 @@ class BotRuntime:
     context_bot_delete_message: Callable[..., Any]
     edit_global_alert_prompt: Callable[..., Any]
     edit_alert_prompt: Callable[..., Any]
+
+
+def user_data_of(context: Any) -> dict[Any, Any]:
+    if context.user_data is None:
+        context.user_data = {}
+    return context.user_data

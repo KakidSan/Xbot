@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Docker/CLI entry point for Xbot."""
+
+from __future__ import annotations
 
 from .bot.application import main
 

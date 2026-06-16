@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ...config import AppConfig, MySQLConfig
+
 from ...common import (
     ALERT_DEFAULT_PERIOD,
     ALERT_PERIOD_LABELS,
@@ -28,23 +33,74 @@ from ...common import (
     sqlite3,
     timedelta,
 )
-from ..mysql import collect_traffic_counters_sync, fetch_user_display_details_sync, fetch_all_user_display_details_sync
+from ..mysql import (
+    collect_traffic_counters_sync,
+    fetch_user_display_details_sync,
+    fetch_all_user_display_details_sync,
+)
+
 
 def _normalize_geo_name(value: Any) -> str:
     return str(value or "").strip()
+
 
 def _geo_text_contains(values: list[str], patterns: list[str]) -> bool:
     text = " ".join(values)
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
+
 def _normalize_taiwan_city(region: str, city: str, district: str) -> str:
     county_cities = {
-        "台北市", "新北市", "桃园市", "臺北市", "新北市", "桃園市", "台中市", "臺中市", "台南市", "臺南市", "高雄市",
-        "基隆市", "新竹市", "嘉义市", "嘉義市", "新竹县", "新竹縣", "苗栗县", "苗栗縣", "彰化县", "彰化縣",
-        "南投县", "南投縣", "云林县", "雲林縣", "嘉义县", "嘉義縣", "屏东县", "屏東縣", "宜兰县", "宜蘭縣",
-        "花莲县", "花蓮縣", "台东县", "臺東縣", "澎湖县", "澎湖縣", "金门县", "金門縣", "连江县", "連江縣",
+        "台北市",
+        "新北市",
+        "桃园市",
+        "臺北市",
+        "新北市",
+        "桃園市",
+        "台中市",
+        "臺中市",
+        "台南市",
+        "臺南市",
+        "高雄市",
+        "基隆市",
+        "新竹市",
+        "嘉义市",
+        "嘉義市",
+        "新竹县",
+        "新竹縣",
+        "苗栗县",
+        "苗栗縣",
+        "彰化县",
+        "彰化縣",
+        "南投县",
+        "南投縣",
+        "云林县",
+        "雲林縣",
+        "嘉义县",
+        "嘉義縣",
+        "屏东县",
+        "屏東縣",
+        "宜兰县",
+        "宜蘭縣",
+        "花莲县",
+        "花蓮縣",
+        "台东县",
+        "臺東縣",
+        "澎湖县",
+        "澎湖縣",
+        "金门县",
+        "金門縣",
+        "连江县",
+        "連江縣",
     }
-    aliases = {"Taipei": "台北市", "New Taipei": "新北市", "Taoyuan": "桃园市", "Taichung": "台中市", "Tainan": "台南市", "Kaohsiung": "高雄市"}
+    aliases = {
+        "Taipei": "台北市",
+        "New Taipei": "新北市",
+        "Taoyuan": "桃园市",
+        "Taichung": "台中市",
+        "Tainan": "台南市",
+        "Kaohsiung": "高雄市",
+    }
     for item in (region, city, district):
         name = _normalize_geo_name(item)
         if not name:
@@ -54,6 +110,7 @@ def _normalize_taiwan_city(region: str, city: str, district: str) -> str:
         if name in aliases:
             return aliases[name]
     return _normalize_geo_name(region or city or district) or "台湾未知城市"
+
 
 def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
     country_code = _normalize_geo_name(data.get("countryCode")).upper()
@@ -65,7 +122,9 @@ def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
 
     if country_code == "HK" or _geo_text_contains(values, [r"香港", r"Hong\s*Kong"]):
         return {"key": "HK:香港", "name": "香港", "level": "sar_city"}
-    if country_code == "MO" or _geo_text_contains(values, [r"澳门", r"澳門", r"Macau", r"Macao"]):
+    if country_code == "MO" or _geo_text_contains(
+        values, [r"澳门", r"澳門", r"Macau", r"Macao"]
+    ):
         return {"key": "MO:澳门", "name": "澳门", "level": "sar_city"}
     if country_code == "TW" or _geo_text_contains(values, [r"台湾", r"Taiwan"]):
         stat_name = _normalize_taiwan_city(region, city, district)
@@ -75,9 +134,18 @@ def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
         if region in municipalities:
             return {"key": f"CN:{region}", "name": region, "level": "municipality"}
         stat_name = city or region or "未知城市"
-        return {"key": f"CN:{region or '未知省份'}:{stat_name}", "name": stat_name, "level": "city"}
+        return {
+            "key": f"CN:{region or '未知省份'}:{stat_name}",
+            "name": stat_name,
+            "level": "city",
+        }
     stat_name = city or region or country or "未知地区"
-    return {"key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}", "name": stat_name, "level": "city"}
+    return {
+        "key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}",
+        "name": stat_name,
+        "level": "city",
+    }
+
 
 def _cache_format_bytes(value: int | float | None) -> str:
     size = float(value or 0)
@@ -88,11 +156,13 @@ def _cache_format_bytes(value: int | float | None) -> str:
         size /= 1024
     return f"{size:.2f} PB"
 
+
 def cached_user_button_label(row: sqlite3.Row | None, xboard_user_id: int) -> str:
     display_name = str(row["display_name"] or "").strip() if row else ""
     if display_name:
         return f"{display_name} (user_id: {xboard_user_id})"
     return f"用户 {xboard_user_id}"
+
 
 def geo_area_rule_label(value: str) -> str:
     value = str(value or "").strip()
@@ -103,6 +173,7 @@ def geo_area_rule_label(value: str) -> str:
     if ":" in value:
         return value.split(":")[-1] or value
     return value
+
 
 def raw_geo_data(row: sqlite3.Row) -> dict[str, Any]:
     try:
@@ -117,15 +188,18 @@ def raw_geo_data(row: sqlite3.Row) -> dict[str, Any]:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
+
 def safe_autolink_text(value: str) -> str:
     """Prevent Telegram from auto-linking domain-like fragments in plain text."""
     return value.replace(".", ".\u200b")
+
 
 def _row_value(row: sqlite3.Row, name: str) -> Any:
     try:
         return row[name]
     except (KeyError, IndexError):
         return None
+
 
 def geo_area_key(row: sqlite3.Row) -> str | None:
     stat_area_key = str(_row_value(row, "stat_area_key") or "").strip()
@@ -142,6 +216,7 @@ def geo_area_key(row: sqlite3.Row) -> str | None:
         return country
     return None
 
+
 def geo_area_display_label(row: sqlite3.Row, value: str | None = None) -> str:
     """Human-facing area label. Do not expose internal rule keys like JP:Tokyo:Tokyo."""
     stat_area_name = str(_row_value(row, "stat_area_name") or "").strip()
@@ -156,14 +231,19 @@ def geo_area_display_label(row: sqlite3.Row, value: str | None = None) -> str:
         return " / ".join(parts)
     return geo_area_rule_label(value or "")
 
+
 def count_geo_areas(rows: list[sqlite3.Row]) -> int:
     return len({key for row in rows if (key := geo_area_key(row))})
+
 
 def render_cached_user_label(row: sqlite3.Row | None, xboard_user_id: int) -> str:
     display_name = str(row["display_name"] or "").strip() if row else ""
     if display_name:
-        return f"{html.escape(display_name)} (user_id: {html.escape(str(xboard_user_id))})"
+        return (
+            f"{html.escape(display_name)} (user_id: {html.escape(str(xboard_user_id))})"
+        )
     return f"用户 {html.escape(str(xboard_user_id))}"
+
 
 def format_duration(seconds: int) -> str:
     seconds = max(0, int(seconds))
@@ -175,10 +255,12 @@ def format_duration(seconds: int) -> str:
         return f"{minutes} 分钟 {sec} 秒" if sec else f"{minutes} 分钟"
     return f"{sec} 秒"
 
+
 def format_timestamp(ts: int | None) -> str:
     if not ts:
         return "未知"
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
 
 def ipv4_24_cidr(value: str) -> str | None:
     try:
@@ -189,6 +271,7 @@ def ipv4_24_cidr(value: str) -> str | None:
         return None
     return str(ipaddress.ip_network(f"{ip_obj}/24", strict=False))
 
+
 def asn_key_from_raw(raw: dict[str, Any]) -> str | None:
     as_text = str(raw.get("as") or "").strip()
     match = re.search(r"\bAS\s*(\d+)\b", as_text, re.IGNORECASE)
@@ -197,6 +280,7 @@ def asn_key_from_raw(raw: dict[str, Any]) -> str | None:
     asn = str(raw.get("asname") or raw.get("org") or raw.get("isp") or "").strip()
     return asn or None
 
+
 def asn_label_from_raw(raw: dict[str, Any]) -> str | None:
     key = asn_key_from_raw(raw)
     name = str(raw.get("asname") or raw.get("org") or raw.get("isp") or "").strip()
@@ -204,22 +288,33 @@ def asn_label_from_raw(raw: dict[str, Any]) -> str | None:
         return f"{key} {name}"
     return key or name or None
 
+
 def geo_location_text(row: sqlite3.Row) -> str:
-    raw_parts = [str(_row_value(row, name) or "").strip() for name in ("country", "region", "city", "district")]
+    raw_parts = [
+        str(_row_value(row, name) or "").strip()
+        for name in ("country", "region", "city", "district")
+    ]
     parts: list[str] = []
     for part in raw_parts:
         if part and part not in parts:
             parts.append(part)
     return "，".join(parts)
 
+
 def asn_text(row: sqlite3.Row) -> str:
     raw = raw_geo_data(row)
-    return asn_label_from_raw(raw) or str(_row_value(row, "isp") or "").strip() or "待查询"
+    return (
+        asn_label_from_raw(raw) or str(_row_value(row, "isp") or "").strip() or "待查询"
+    )
+
 
 def asn_key_for_geo_row(row: sqlite3.Row) -> str | None:
     return asn_key_from_raw(raw_geo_data(row))
 
-def ignore_items_from_ip_rows(rows: list[sqlite3.Row], dimension: str) -> list[dict[str, Any]]:
+
+def ignore_items_from_ip_rows(
+    rows: list[sqlite3.Row], dimension: str
+) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
     for row in rows:
         if dimension == "area":
@@ -239,15 +334,29 @@ def ignore_items_from_ip_rows(rows: list[sqlite3.Row], dimension: str) -> list[d
             label = value
         else:
             continue
-        bucket = buckets.setdefault(value, {"value": value, "label": label, "ips": set(), "last_seen_at": 0})
+        bucket = buckets.setdefault(
+            value, {"value": value, "label": label, "ips": set(), "last_seen_at": 0}
+        )
         bucket["ips"].add(str(row["ip"]))
-        bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
+        bucket["last_seen_at"] = max(
+            int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0)
+        )
     return [
-        {"value": value, "label": str(bucket["label"]), "sub": f"{len(bucket['ips'])} IP", "last_seen_at": int(bucket["last_seen_at"])}
-        for value, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
+        {
+            "value": value,
+            "label": str(bucket["label"]),
+            "sub": f"{len(bucket['ips'])} IP",
+            "last_seen_at": int(bucket["last_seen_at"]),
+        }
+        for value, bucket in sorted(
+            buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0])
+        )
     ]
 
-def render_cached_ip_bucket(title: str, rows: list[sqlite3.Row], shown_ips: set[str], cutoff_ts: int) -> list[str]:
+
+def render_cached_ip_bucket(
+    title: str, rows: list[sqlite3.Row], shown_ips: set[str], cutoff_ts: int
+) -> list[str]:
     bucket_rows: list[sqlite3.Row] = []
     for row in rows:
         ip = str(row["ip"])
@@ -258,7 +367,10 @@ def render_cached_ip_bucket(title: str, rows: list[sqlite3.Row], shown_ips: set[
         bucket_rows.append(row)
         shown_ips.add(ip)
 
-    lines = [f"🌐 <b>{title}活跃 IP {len(bucket_rows)} 个，活跃地区 {count_geo_areas(bucket_rows)} 个</b>", ""]
+    lines = [
+        f"🌐 <b>{title}活跃 IP {len(bucket_rows)} 个，活跃地区 {count_geo_areas(bucket_rows)} 个</b>",
+        "",
+    ]
     if not bucket_rows:
         return lines[:-1]
     for index, row in enumerate(bucket_rows, start=1):
@@ -266,16 +378,19 @@ def render_cached_ip_bucket(title: str, rows: list[sqlite3.Row], shown_ips: set[
         location = geo_location_text(row) or "待查询"
         safe_location = html.escape(safe_autolink_text(location))
         safe_asn = html.escape(safe_autolink_text(asn_text(row)))
-        lines.extend([
-            f"{index}. <code>{html.escape(ip)}/24</code>",
-            f"📍地区：{safe_location}",
-            f"🏷️ ASN：{safe_asn}",
-            f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
-            "────────────",
-        ])
+        lines.extend(
+            [
+                f"{index}. <code>{html.escape(ip)}/24</code>",
+                f"📍地区：{safe_location}",
+                f"🏷️ ASN：{safe_asn}",
+                f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
+                "────────────",
+            ]
+        )
     if lines[-1] == "────────────":
         lines.pop()
     return lines
+
 
 def render_user_ip_rows_page(
     user_label: str,
@@ -291,7 +406,7 @@ def render_user_ip_rows_page(
     total_pages = max(1, (total + safe_page_size - 1) // safe_page_size)
     page = min(max(page, 0), total_pages - 1)
     start = page * safe_page_size
-    page_rows = rows[start:start + safe_page_size]
+    page_rows = rows[start : start + safe_page_size]
     if start_ts is not None and end_ts is not None and label == "自定区间":
         lines = [
             f"{user_label}",
@@ -314,34 +429,57 @@ def render_user_ip_rows_page(
         location = geo_location_text(row) or "待查询"
         safe_location = html.escape(safe_autolink_text(location))
         safe_asn = html.escape(safe_autolink_text(asn_text(row)))
-        lines.extend([
-            f"{index}. <code>{html.escape(ip)}/24</code>",
-            f"📍地区：{safe_location}",
-            f"🏷️ ASN：{safe_asn}",
-            f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
-            "────────────",
-        ])
+        lines.extend(
+            [
+                f"{index}. <code>{html.escape(ip)}/24</code>",
+                f"📍地区：{safe_location}",
+                f"🏷️ ASN：{safe_asn}",
+                f"🕒最后活跃时间：{html.escape(format_timestamp(int(row['last_seen_at'])))}",
+                "────────────",
+            ]
+        )
     if lines[-1] == "────────────":
         lines.pop()
     return "\n".join(lines).strip()
 
-def alert_setting_label(setting: dict[str, Any], alert_type: str, cache_path: Path | None = None) -> str:
+
+def alert_setting_label(
+    setting: dict[str, Any], alert_type: str, cache_path: Path | None = None
+) -> str:
     if alert_type == "traffic":
         if int(setting.get("traffic_whitelist") or 0):
             return "白名单"
-        period = setting.get("traffic_period") or (alert_global_period_sync(cache_path, "traffic") if cache_path else ALERT_DEFAULT_PERIOD)
-        threshold = setting.get("traffic_threshold_bytes") or (alert_global_threshold_sync(cache_path, "traffic") if cache_path else TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES)
+        period = setting.get("traffic_period") or (
+            alert_global_period_sync(cache_path, "traffic")
+            if cache_path
+            else ALERT_DEFAULT_PERIOD
+        )
+        threshold = setting.get("traffic_threshold_bytes") or (
+            alert_global_threshold_sync(cache_path, "traffic")
+            if cache_path
+            else TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES
+        )
         return f"{alert_period_label(period)} / {_cache_format_bytes(int(threshold))}"
     if int(setting.get("ip_whitelist") or 0):
         return "白名单"
-    period = setting.get("ip_period") or (alert_global_period_sync(cache_path, "ip") if cache_path else ALERT_DEFAULT_PERIOD)
-    threshold = setting.get("ip_city_threshold") or (alert_global_threshold_sync(cache_path, "ip") if cache_path else IP_ALERT_DEFAULT_CITY_THRESHOLD)
+    period = setting.get("ip_period") or (
+        alert_global_period_sync(cache_path, "ip")
+        if cache_path
+        else ALERT_DEFAULT_PERIOD
+    )
+    threshold = setting.get("ip_city_threshold") or (
+        alert_global_threshold_sync(cache_path, "ip")
+        if cache_path
+        else IP_ALERT_DEFAULT_CITY_THRESHOLD
+    )
     return f"{alert_period_label(period)} / {int(threshold)} 个城市"
+
 
 def resolve_cache_path(path: Path, base_dir: Path | None = None) -> Path:
     if path.is_absolute():
         return path
     return (base_dir or Path.cwd()) / path
+
 
 def cache_connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,6 +488,7 @@ def cache_connect(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
 
 def init_cache(path: Path) -> None:
     cache_path = path.resolve()
@@ -523,19 +662,29 @@ def init_cache(path: Path) -> None:
                 ON traffic_sample_gaps(gap_start_at, gap_end_at);
             """
         )
-        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(alert_user_settings)").fetchall()}
+        existing_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(alert_user_settings)").fetchall()
+        }
         if "traffic_period" not in existing_columns:
-            conn.execute("ALTER TABLE alert_user_settings ADD COLUMN traffic_period TEXT")
+            conn.execute(
+                "ALTER TABLE alert_user_settings ADD COLUMN traffic_period TEXT"
+            )
         if "ip_period" not in existing_columns:
             conn.execute("ALTER TABLE alert_user_settings ADD COLUMN ip_period TEXT")
-        active_ip_columns = {row[1] for row in conn.execute("PRAGMA table_info(active_ip_records)").fetchall()}
+        active_ip_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(active_ip_records)").fetchall()
+        }
         if "ignored_at" not in active_ip_columns:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignored_at INTEGER")
         if "ignore_reason" not in active_ip_columns:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_reason TEXT")
         if "ignore_note" not in active_ip_columns:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_note TEXT")
-        geo_cache_columns = {row[1] for row in conn.execute("PRAGMA table_info(ip_geo_cache)").fetchall()}
+        geo_cache_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(ip_geo_cache)").fetchall()
+        }
         for column_name, column_type in {
             "district": "TEXT",
             "stat_area_key": "TEXT",
@@ -543,7 +692,9 @@ def init_cache(path: Path) -> None:
             "stat_area_level": "TEXT",
         }.items():
             if column_name not in geo_cache_columns:
-                conn.execute(f"ALTER TABLE ip_geo_cache ADD COLUMN {column_name} {column_type}")
+                conn.execute(
+                    f"ALTER TABLE ip_geo_cache ADD COLUMN {column_name} {column_type}"
+                )
         rows_needing_stat_area = conn.execute(
             """
             SELECT ip, raw
@@ -558,7 +709,10 @@ def init_cache(path: Path) -> None:
                 raw_data = json.loads(str(geo_row["raw"] or "{}"))
             except Exception:
                 continue
-            if not isinstance(raw_data, dict) or raw_data.get("status") not in (None, "success"):
+            if not isinstance(raw_data, dict) or raw_data.get("status") not in (
+                None,
+                "success",
+            ):
                 continue
             stat_area = build_geo_stat_area(raw_data)
             conn.execute(
@@ -580,14 +734,16 @@ def init_cache(path: Path) -> None:
             )
     _INITIALIZED_CACHE_PATHS.add(cache_path)
 
+
 def ui_pref_get_sync(cache_path: Path, user_id: int, key: str) -> str | None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             "SELECT value FROM ui_preferences WHERE user_id = ? AND key = ?",
- (user_id, key),
+            (user_id, key),
         ).fetchone()
     return str(row["value"]) if row else None
+
 
 def ui_pref_set_sync(cache_path: Path, user_id: int, key: str, value: str) -> None:
     init_cache(cache_path)
@@ -601,13 +757,17 @@ def ui_pref_set_sync(cache_path: Path, user_id: int, key: str, value: str) -> No
                 value = excluded.value,
                 updated_at = excluded.updated_at
             """,
- (user_id, key, value, now_ts),
+            (user_id, key, value, now_ts),
         )
+
 
 def ui_pref_delete_sync(cache_path: Path, user_id: int, key: str) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        conn.execute("DELETE FROM ui_preferences WHERE user_id = ? AND key = ?", (user_id, key))
+        conn.execute(
+            "DELETE FROM ui_preferences WHERE user_id = ? AND key = ?", (user_id, key)
+        )
+
 
 def actor_name_from_user(user: Any) -> str:
     if not user:
@@ -618,7 +778,15 @@ def actor_name_from_user(user: Any) -> str:
         return f"{full_name} (@{username})"
     return str(full_name or username or getattr(user, "id", "未知用户"))
 
-def operation_log_add_sync(cache_path: Path, actor_tg_id: int | None, actor_name: str | None, category: str, action: str, detail: str = "") -> None:
+
+def operation_log_add_sync(
+    cache_path: Path,
+    actor_tg_id: int | None,
+    actor_name: str | None,
+    category: str,
+    action: str,
+    detail: str = "",
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -630,7 +798,13 @@ def operation_log_add_sync(cache_path: Path, actor_tg_id: int | None, actor_name
             (now_ts, actor_tg_id, actor_name or "", category, action, detail or ""),
         )
 
-def operation_logs_list_sync(cache_path: Path, category: str | None = None, limit: int = 30, viewer_user_id: int | None = None) -> list[dict[str, Any]]:
+
+def operation_logs_list_sync(
+    cache_path: Path,
+    category: str | None = None,
+    limit: int = 30,
+    viewer_user_id: int | None = None,
+) -> list[dict[str, Any]]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         if viewer_user_id is not None:
@@ -657,31 +831,49 @@ def operation_logs_list_sync(cache_path: Path, category: str | None = None, limi
             ).fetchall()
     return [dict(row) for row in rows]
 
-def operation_log_counts_sync(cache_path: Path, viewer_user_id: int, categories: list[str]) -> dict[str, tuple[int, int]]:
+
+def operation_log_counts_sync(
+    cache_path: Path, viewer_user_id: int, categories: list[str]
+) -> dict[str, tuple[int, int]]:
     init_cache(cache_path)
     result = {category: (0, 0) for category in categories}
     with cache_connect(cache_path) as conn:
         for category in categories:
-            total = int(conn.execute("SELECT COUNT(*) FROM operation_logs WHERE category = ?", (category,)).fetchone()[0] or 0)
-            read_count = int(conn.execute(
-                """
+            total = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM operation_logs WHERE category = ?",
+                    (category,),
+                ).fetchone()[0]
+                or 0
+            )
+            read_count = int(
+                conn.execute(
+                    """
                 SELECT COUNT(*)
                 FROM operation_logs l
                 JOIN operation_log_reads r ON r.log_id = l.id AND r.user_id = ?
                 WHERE l.category = ?
                 """,
-                (int(viewer_user_id), category),
-            ).fetchone()[0] or 0)
+                    (int(viewer_user_id), category),
+                ).fetchone()[0]
+                or 0
+            )
             result[category] = (max(total - read_count, 0), total)
     return result
+
 
 def operation_log_get_sync(cache_path: Path, log_id: int) -> dict[str, Any] | None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        row = conn.execute("SELECT * FROM operation_logs WHERE id = ?", (int(log_id),)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM operation_logs WHERE id = ?", (int(log_id),)
+        ).fetchone()
     return dict(row) if row else None
 
-def operation_log_mark_read_sync(cache_path: Path, viewer_user_id: int, log_id: int) -> None:
+
+def operation_log_mark_read_sync(
+    cache_path: Path, viewer_user_id: int, log_id: int
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -694,23 +886,30 @@ def operation_log_mark_read_sync(cache_path: Path, viewer_user_id: int, log_id: 
             (int(viewer_user_id), int(log_id), now_ts),
         )
 
-def set_collector_state(conn: sqlite3.Connection, key: str, value: str, now_ts: int) -> None:
+
+def set_collector_state(
+    conn: sqlite3.Connection, key: str, value: str, now_ts: int
+) -> None:
     conn.execute(
         """
         INSERT INTO collector_state(key, value, updated_at)
         VALUES (?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
         """,
- (key, value, now_ts),
+        (key, value, now_ts),
     )
+
 
 def get_collector_state_sync(cache_path: Path, key: str) -> tuple[str, int] | None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        row = conn.execute("SELECT value, updated_at FROM collector_state WHERE key = ?", (key,)).fetchone()
+        row = conn.execute(
+            "SELECT value, updated_at FROM collector_state WHERE key = ?", (key,)
+        ).fetchone()
     if not row:
         return None
     return str(row["value"]), int(row["updated_at"] or 0)
+
 
 def auth_roles_load_sync(cache_path: Path) -> tuple[set[int], set[int]] | None:
     state = get_collector_state_sync(cache_path, "telegram_auth_roles")
@@ -722,9 +921,14 @@ def auth_roles_load_sync(cache_path: Path) -> tuple[set[int], set[int]] | None:
         return None
     if not isinstance(data, dict):
         return None
-    return _as_int_set(data.get("manager_user_ids")), _as_int_set(data.get("authorized_user_ids"))
+    return _as_int_set(data.get("manager_user_ids")), _as_int_set(
+        data.get("authorized_user_ids")
+    )
 
-def auth_roles_save_sync(cache_path: Path, manager_user_ids: set[int], authorized_user_ids: set[int]) -> None:
+
+def auth_roles_save_sync(
+    cache_path: Path, manager_user_ids: set[int], authorized_user_ids: set[int]
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     payload = json.dumps(
@@ -737,6 +941,7 @@ def auth_roles_save_sync(cache_path: Path, manager_user_ids: set[int], authorize
     )
     with cache_connect(cache_path) as conn:
         set_collector_state(conn, "telegram_auth_roles", payload, now_ts)
+
 
 def update_telegram_roles_in_cache_sync(
     cache_path: Path,
@@ -751,7 +956,11 @@ def update_telegram_roles_in_cache_sync(
 ) -> tuple[set[int], set[int]]:
     managers = set(current_manager_user_ids)
     users = set(current_authorized_user_ids)
-    super_admin_ids = set(admin_user_id) if isinstance(admin_user_id, set) else ({admin_user_id} if admin_user_id is not None else set())
+    super_admin_ids = (
+        set(admin_user_id)
+        if isinstance(admin_user_id, set)
+        else ({admin_user_id} if admin_user_id is not None else set())
+    )
 
     def ensure_not_super_admin(uid: int) -> None:
         if int(uid) in super_admin_ids:
@@ -796,7 +1005,15 @@ def update_telegram_roles_in_cache_sync(
     auth_roles_save_sync(cache_path, managers, users)
     return managers, users
 
-def update_authorized_users_in_cache_sync(cache_path: Path, admin_user_id: int | set[int] | None, current_manager_user_ids: set[int], current_authorized_user_ids: set[int], add_user_id: int | None = None, remove_user_ids: set[int] | None = None) -> set[int]:
+
+def update_authorized_users_in_cache_sync(
+    cache_path: Path,
+    admin_user_id: int | set[int] | None,
+    current_manager_user_ids: set[int],
+    current_authorized_user_ids: set[int],
+    add_user_id: int | None = None,
+    remove_user_ids: set[int] | None = None,
+) -> set[int]:
     _, users = update_telegram_roles_in_cache_sync(
         cache_path,
         admin_user_id,
@@ -807,13 +1024,16 @@ def update_authorized_users_in_cache_sync(cache_path: Path, admin_user_id: int |
     )
     return users
 
-def notification_status_sync(cache_path: Path, chat_id: str, default_enabled_kinds: set[str] | None = None) -> dict[str, bool]:
+
+def notification_status_sync(
+    cache_path: Path, chat_id: str, default_enabled_kinds: set[str] | None = None
+) -> dict[str, bool]:
     init_cache(cache_path)
     default_enabled_kinds = default_enabled_kinds or set()
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
             "SELECT kind, enabled FROM notification_subscriptions WHERE chat_id = ?",
- (chat_id,),
+            (chat_id,),
         ).fetchall()
     status = {kind: kind in default_enabled_kinds for kind in NOTIFICATION_KINDS}
     for row in rows:
@@ -821,6 +1041,7 @@ def notification_status_sync(cache_path: Path, chat_id: str, default_enabled_kin
         if kind in status:
             status[kind] = bool(int(row["enabled"] or 0))
     return status
+
 
 def notification_ip_alert_mode_sync(cache_path: Path, chat_id: str) -> str:
     """Return ip_alert delivery mode: off/basic/advanced. Stored as enabled 0/1/2 for compatibility."""
@@ -839,6 +1060,7 @@ def notification_ip_alert_mode_sync(cache_path: Path, chat_id: str) -> str:
         return "basic"
     return "off"
 
+
 def notification_toggle_sync(cache_path: Path, chat_id: str, kind: str) -> bool | str:
     if kind not in NOTIFICATION_KINDS:
         raise ValueError("unknown notification kind")
@@ -848,7 +1070,7 @@ def notification_toggle_sync(cache_path: Path, chat_id: str, kind: str) -> bool 
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             "SELECT enabled FROM notification_subscriptions WHERE chat_id = ? AND kind = ?",
- (chat_id, kind),
+            (chat_id, kind),
         ).fetchone()
         current_enabled = int(row["enabled"] if row else default_enabled)
         if kind == "ip_alert":
@@ -864,30 +1086,38 @@ def notification_toggle_sync(cache_path: Path, chat_id: str, kind: str) -> bool 
                 enabled=excluded.enabled,
                 updated_at=excluded.updated_at
             """,
- (chat_id, kind, new_enabled, now_ts),
+            (chat_id, kind, new_enabled, now_ts),
         )
     if kind == "ip_alert":
-        return "advanced" if new_enabled >= 2 else ("basic" if new_enabled == 1 else "off")
+        return (
+            "advanced" if new_enabled >= 2 else ("basic" if new_enabled == 1 else "off")
+        )
     return bool(new_enabled)
+
 
 def notification_enabled_chats_sync(cache_path: Path, kind: str) -> list[str]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
             "SELECT chat_id FROM notification_subscriptions WHERE kind = ? AND enabled = 1",
- (kind,),
+            (kind,),
         ).fetchall()
     return [str(row["chat_id"]) for row in rows]
 
-def default_allowlist_notification_chats_sync(cache_path: Path, cfg: AppConfig, kind: str) -> list[str]:
+
+def default_allowlist_notification_chats_sync(
+    cache_path: Path, cfg: AppConfig, kind: str
+) -> list[str]:
     """Notifications in DEFAULT_ALLOWLIST_NOTIFICATION_KINDS are enabled for Telegram allowlist unless explicitly disabled."""
     if kind == "version_update":
-        chats: list[str] = []
+        version_chats: list[str] = []
         for admin_uid in sorted(cfg.telegram.super_admin_user_ids):
             admin_chat = str(admin_uid)
-            if notification_status_sync(cache_path, admin_chat, DEFAULT_ALLOWLIST_NOTIFICATION_KINDS).get(kind):
-                chats.append(admin_chat)
-        return chats
+            if notification_status_sync(
+                cache_path, admin_chat, DEFAULT_ALLOWLIST_NOTIFICATION_KINDS
+            ).get(kind):
+                version_chats.append(admin_chat)
+        return version_chats
     if kind not in DEFAULT_ALLOWLIST_NOTIFICATION_KINDS:
         return notification_enabled_chats_sync(cache_path, kind)
     init_cache(cache_path)
@@ -895,7 +1125,7 @@ def default_allowlist_notification_chats_sync(cache_path: Path, cfg: AppConfig, 
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
             "SELECT chat_id, enabled FROM notification_subscriptions WHERE kind = ?",
- (kind,),
+            (kind,),
         ).fetchall()
     for row in rows:
         chat_id = str(row["chat_id"])
@@ -905,21 +1135,41 @@ def default_allowlist_notification_chats_sync(cache_path: Path, cfg: AppConfig, 
             chats.discard(chat_id)
     return sorted(chats)
 
+
 def collector_notification_chats_sync(cache_path: Path, cfg: AppConfig) -> list[str]:
     return default_allowlist_notification_chats_sync(cache_path, cfg, "collector")
 
-def alert_notification_chats_sync(cache_path: Path, cfg: AppConfig, alert_type: str) -> list[str]:
+
+def alert_notification_chats_sync(
+    cache_path: Path, cfg: AppConfig, alert_type: str
+) -> list[str]:
     kind = "traffic_alert" if alert_type == "traffic" else "ip_alert"
     return default_allowlist_notification_chats_sync(cache_path, cfg, kind)
 
-def ip_alert_notification_chat_modes_sync(cache_path: Path, cfg: AppConfig) -> dict[str, str]:
-    return {chat_id: notification_ip_alert_mode_sync(cache_path, chat_id) for chat_id in alert_notification_chats_sync(cache_path, cfg, "ip")}
+
+def ip_alert_notification_chat_modes_sync(
+    cache_path: Path, cfg: AppConfig
+) -> dict[str, str]:
+    return {
+        chat_id: notification_ip_alert_mode_sync(cache_path, chat_id)
+        for chat_id in alert_notification_chats_sync(cache_path, cfg, "ip")
+    }
+
 
 def alert_global_period_sync(cache_path: Path, alert_type: str) -> str:
-    key = "traffic_alert_global_period" if alert_type == "traffic" else "ip_alert_global_period"
+    key = (
+        "traffic_alert_global_period"
+        if alert_type == "traffic"
+        else "ip_alert_global_period"
+    )
     value = alert_state_get_sync(cache_path, key)
-    default_period = TRAFFIC_ALERT_DEFAULT_PERIOD if alert_type == "traffic" else ALERT_DEFAULT_PERIOD
+    default_period = (
+        TRAFFIC_ALERT_DEFAULT_PERIOD
+        if alert_type == "traffic"
+        else ALERT_DEFAULT_PERIOD
+    )
     return value if value in ALERT_PERIOD_LABELS else default_period
+
 
 def initialization_mark_started_sync(cache_path: Path, reason: str = "startup") -> None:
     init_cache(cache_path)
@@ -928,16 +1178,36 @@ def initialization_mark_started_sync(cache_path: Path, reason: str = "startup") 
         set_collector_state(conn, "initialization_status", "running", now_ts)
         set_collector_state(conn, "initialization_started_at", str(now_ts), now_ts)
         set_collector_state(conn, "initialization_reason", reason, now_ts)
-        conn.execute("DELETE FROM collector_state WHERE key = 'initialization_completed_at'")
+        conn.execute(
+            "DELETE FROM collector_state WHERE key = 'initialization_completed_at'"
+        )
 
-def initialization_mark_complete_sync(cache_path: Path, records_count: int, geo_total: int, geo_success: int, geo_failed: int) -> None:
+
+def initialization_mark_complete_sync(
+    cache_path: Path,
+    records_count: int,
+    geo_total: int,
+    geo_success: int,
+    geo_failed: int,
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
-    payload = {"records": int(records_count), "geo_total": int(geo_total), "geo_success": int(geo_success), "geo_failed": int(geo_failed)}
+    payload = {
+        "records": int(records_count),
+        "geo_total": int(geo_total),
+        "geo_success": int(geo_success),
+        "geo_failed": int(geo_failed),
+    }
     with cache_connect(cache_path) as conn:
         set_collector_state(conn, "initialization_status", "awaiting_ack", now_ts)
         set_collector_state(conn, "initialization_completed_at", str(now_ts), now_ts)
-        set_collector_state(conn, "initialization_result", json.dumps(payload, ensure_ascii=False), now_ts)
+        set_collector_state(
+            conn,
+            "initialization_result",
+            json.dumps(payload, ensure_ascii=False),
+            now_ts,
+        )
+
 
 def initialization_acknowledge_sync(cache_path: Path) -> None:
     init_cache(cache_path)
@@ -946,26 +1216,43 @@ def initialization_acknowledge_sync(cache_path: Path) -> None:
         set_collector_state(conn, "initialization_status", "complete", now_ts)
         set_collector_state(conn, "initialization_acknowledged_at", str(now_ts), now_ts)
 
-def initialization_status_sync(cache_path: Path, queries_per_minute: int = DEFAULT_IP_GEO_QUERIES_PER_MINUTE) -> dict[str, Any]:
+
+def initialization_status_sync(
+    cache_path: Path, queries_per_minute: int = DEFAULT_IP_GEO_QUERIES_PER_MINUTE
+) -> dict[str, Any]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        active_ips = int(conn.execute("SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
-        geo_total = int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0)
-        geo_pending = int(conn.execute(
-            """
+        active_ips = int(
+            conn.execute(
+                "SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
+        geo_total = int(
+            conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0
+        )
+        geo_pending = int(
+            conn.execute(
+                """
             SELECT COUNT(*) FROM ip_geo_cache
             WHERE (queried_at IS NULL OR queried_at <= 0)
               AND (raw IS NULL OR raw = '')
             """
-        ).fetchone()[0] or 0)
-        geo_finished = int(conn.execute(
-            """
+            ).fetchone()[0]
+            or 0
+        )
+        geo_finished = int(
+            conn.execute(
+                """
             SELECT COUNT(*) FROM ip_geo_cache
             WHERE queried_at IS NOT NULL AND queried_at > 0
             """
-        ).fetchone()[0] or 0)
-        geo_no_result = int(conn.execute(
-            """
+            ).fetchone()[0]
+            or 0
+        )
+        geo_no_result = int(
+            conn.execute(
+                """
             SELECT COUNT(*) FROM ip_geo_cache
             WHERE queried_at IS NOT NULL AND queried_at > 0
               AND (raw IS NOT NULL AND raw <> '')
@@ -973,15 +1260,25 @@ def initialization_status_sync(cache_path: Path, queries_per_minute: int = DEFAU
               AND (region IS NULL OR region = '')
               AND (city IS NULL OR city = '')
             """
-        ).fetchone()[0] or 0)
+            ).fetchone()[0]
+            or 0
+        )
     status_state = get_collector_state_sync(cache_path, "initialization_status")
     started_state = get_collector_state_sync(cache_path, "initialization_started_at")
-    completed_state = get_collector_state_sync(cache_path, "initialization_completed_at")
+    completed_state = get_collector_state_sync(
+        cache_path, "initialization_completed_at"
+    )
     reset_state = get_collector_state_sync(cache_path, "cache_reset_at")
     collect_state = get_collector_state_sync(cache_path, "last_collect_at")
     status = status_state[0] if status_state else "complete"
-    reset_ts = int(reset_state[0]) if reset_state and str(reset_state[0]).isdigit() else None
-    completed_ts = int(completed_state[0]) if completed_state and str(completed_state[0]).isdigit() else None
+    reset_ts = (
+        int(reset_state[0]) if reset_state and str(reset_state[0]).isdigit() else None
+    )
+    completed_ts = (
+        int(completed_state[0])
+        if completed_state and str(completed_state[0]).isdigit()
+        else None
+    )
     if reset_ts and (not completed_ts or completed_ts < reset_ts):
         status = "running"
     elif status == "running" and geo_pending <= 0 and collect_state:
@@ -992,7 +1289,9 @@ def initialization_status_sync(cache_path: Path, queries_per_minute: int = DEFAU
         "status": status,
         "initializing": initializing,
         "awaiting_ack": status == "awaiting_ack",
-        "started_at": int(started_state[0]) if started_state and str(started_state[0]).isdigit() else None,
+        "started_at": int(started_state[0])
+        if started_state and str(started_state[0]).isdigit()
+        else None,
         "completed_at": completed_ts,
         "last_collect_at": collect_state[1] if collect_state else None,
         "active_ips": int(active_ips),
@@ -1000,8 +1299,14 @@ def initialization_status_sync(cache_path: Path, queries_per_minute: int = DEFAU
         "geo_finished": int(geo_finished),
         "geo_no_result": int(geo_no_result),
         "geo_pending": pending,
-        "estimated_remaining_seconds": int((pending * 60 + max(1, int(queries_per_minute)) - 1) // max(1, int(queries_per_minute))) if pending > 0 else 0,
+        "estimated_remaining_seconds": int(
+            (pending * 60 + max(1, int(queries_per_minute)) - 1)
+            // max(1, int(queries_per_minute))
+        )
+        if pending > 0
+        else 0,
     }
+
 
 def initialization_progress_text_sync(cache_path: Path, cfg: AppConfig) -> str:
     status = initialization_status_sync(cache_path, cfg.ip_geo_queries_per_minute)
@@ -1021,7 +1326,9 @@ def initialization_progress_text_sync(cache_path: Path, cfg: AppConfig) -> str:
             lines.append(f"使用时间：{format_duration(elapsed)}")
         if status.get("completed_at"):
             lines.append(f"完成时间：{format_timestamp(status['completed_at'])}")
-        lines.extend(["", "请确认以上结果。点击下方按钮后，将进入主菜单并开始允许 IP 告警判断。"])
+        lines.extend(
+            ["", "请确认以上结果。点击下方按钮后，将进入主菜单并开始允许 IP 告警判断。"]
+        )
         return "\n".join(lines)
     lines = [
         "⏳ <b>正在初始化 Xbot 缓存</b>",
@@ -1035,27 +1342,43 @@ def initialization_progress_text_sync(cache_path: Path, cfg: AppConfig) -> str:
     if status["geo_pending"] > 0:
         lines.append("当前状态：等待查询或限流重试")
     if status.get("geo_no_result", 0) > 0:
-        lines.append(f"已处理但无可用归属地：{status['geo_no_result']} 条（不阻塞初始化）")
+        lines.append(
+            f"已处理但无可用归属地：{status['geo_no_result']} 条（不阻塞初始化）"
+        )
     if status["geo_pending"] > 0:
-        lines.append(f"预计剩余：约 {format_duration(status['estimated_remaining_seconds'])}")
+        lines.append(
+            f"预计剩余：约 {format_duration(status['estimated_remaining_seconds'])}"
+        )
     else:
         lines.append("预计剩余：等待下一轮采集确认")
     if status.get("started_at"):
         lines.append(f"开始时间：{format_timestamp(status['started_at'])}")
     if status.get("last_collect_at"):
         lines.append(f"最近采集：{format_timestamp(status['last_collect_at'])}")
-    lines.extend(["", "请稍后刷新。短期限流会自动等待并重试；不会把限流误判为查询失败。"])
+    lines.extend(
+        ["", "请稍后刷新。短期限流会自动等待并重试；不会把限流误判为查询失败。"]
+    )
     return "\n".join(lines)
+
 
 def alert_set_global_period_sync(cache_path: Path, alert_type: str, period: str) -> str:
     if period not in ALERT_PERIOD_LABELS:
         raise ValueError("unknown alert period")
-    key = "traffic_alert_global_period" if alert_type == "traffic" else "ip_alert_global_period"
+    key = (
+        "traffic_alert_global_period"
+        if alert_type == "traffic"
+        else "ip_alert_global_period"
+    )
     alert_state_set_sync(cache_path, key, period)
     return period
 
+
 def alert_global_threshold_sync(cache_path: Path, alert_type: str) -> int:
-    key = "traffic_alert_global_threshold_bytes" if alert_type == "traffic" else "ip_alert_global_city_threshold"
+    key = (
+        "traffic_alert_global_threshold_bytes"
+        if alert_type == "traffic"
+        else "ip_alert_global_city_threshold"
+    )
     value = alert_state_get_sync(cache_path, key)
     if value is not None:
         try:
@@ -1064,15 +1387,27 @@ def alert_global_threshold_sync(cache_path: Path, alert_type: str) -> int:
                 return parsed
         except ValueError:
             pass
-    return TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES if alert_type == "traffic" else IP_ALERT_DEFAULT_CITY_THRESHOLD
+    return (
+        TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES
+        if alert_type == "traffic"
+        else IP_ALERT_DEFAULT_CITY_THRESHOLD
+    )
 
-def alert_set_global_threshold_sync(cache_path: Path, alert_type: str, value: int) -> int:
+
+def alert_set_global_threshold_sync(
+    cache_path: Path, alert_type: str, value: int
+) -> int:
     if value <= 0:
         raise ValueError("threshold must be positive")
-    key = "traffic_alert_global_threshold_bytes" if alert_type == "traffic" else "ip_alert_global_city_threshold"
-    stored = value * 1024 ** 3 if alert_type == "traffic" else value
+    key = (
+        "traffic_alert_global_threshold_bytes"
+        if alert_type == "traffic"
+        else "ip_alert_global_city_threshold"
+    )
+    stored = value * 1024**3 if alert_type == "traffic" else value
     alert_state_set_sync(cache_path, key, str(stored))
     return stored
+
 
 def alert_user_setting_sync(cache_path: Path, xboard_user_id: int) -> dict[str, Any]:
     init_cache(cache_path)
@@ -1082,7 +1417,7 @@ def alert_user_setting_sync(cache_path: Path, xboard_user_id: int) -> dict[str, 
             SELECT user_id, traffic_threshold_bytes, traffic_whitelist, traffic_period, ip_city_threshold, ip_whitelist, ip_period
             FROM alert_user_settings WHERE user_id = ?
             """,
- (xboard_user_id,),
+            (xboard_user_id,),
         ).fetchone()
     if not row:
         return {
@@ -1096,7 +1431,10 @@ def alert_user_setting_sync(cache_path: Path, xboard_user_id: int) -> dict[str, 
         }
     return dict(row)
 
-def alert_upsert_setting_sync(cache_path: Path, xboard_user_id: int, **changes: Any) -> dict[str, Any]:
+
+def alert_upsert_setting_sync(
+    cache_path: Path, xboard_user_id: int, **changes: Any
+) -> dict[str, Any]:
     init_cache(cache_path)
     current = alert_user_setting_sync(cache_path, xboard_user_id)
     current.update(changes)
@@ -1115,7 +1453,7 @@ def alert_upsert_setting_sync(cache_path: Path, xboard_user_id: int, **changes: 
                 ip_period=excluded.ip_period,
                 updated_at=excluded.updated_at
             """,
- (
+            (
                 xboard_user_id,
                 current.get("traffic_threshold_bytes"),
                 int(current.get("traffic_whitelist") or 0),
@@ -1128,14 +1466,32 @@ def alert_upsert_setting_sync(cache_path: Path, xboard_user_id: int, **changes: 
         )
     return alert_user_setting_sync(cache_path, xboard_user_id)
 
-def alert_reset_setting_sync(cache_path: Path, xboard_user_id: int, alert_type: str) -> dict[str, Any]:
+
+def alert_reset_setting_sync(
+    cache_path: Path, xboard_user_id: int, alert_type: str
+) -> dict[str, Any]:
     if alert_type == "traffic":
-        return alert_upsert_setting_sync(cache_path, xboard_user_id, traffic_threshold_bytes=None, traffic_period=None, traffic_whitelist=0)
+        return alert_upsert_setting_sync(
+            cache_path,
+            xboard_user_id,
+            traffic_threshold_bytes=None,
+            traffic_period=None,
+            traffic_whitelist=0,
+        )
     if alert_type == "ip":
-        return alert_upsert_setting_sync(cache_path, xboard_user_id, ip_city_threshold=None, ip_period=None, ip_whitelist=0)
+        return alert_upsert_setting_sync(
+            cache_path,
+            xboard_user_id,
+            ip_city_threshold=None,
+            ip_period=None,
+            ip_whitelist=0,
+        )
     raise ValueError("unknown alert type")
 
-def alert_user_list_sync(cache_path: Path, alert_type: str, limit: int = 500) -> list[dict[str, Any]]:
+
+def alert_user_list_sync(
+    cache_path: Path, alert_type: str, limit: int = 500
+) -> list[dict[str, Any]]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
@@ -1148,14 +1504,26 @@ def alert_user_list_sync(cache_path: Path, alert_type: str, limit: int = 500) ->
             ORDER BY u.user_id ASC
             LIMIT ?
             """,
- (limit,),
+            (limit,),
         ).fetchall()
     result = []
     for row in rows:
-        name = str(row["display_name"] or row["remarks"] or row["email"] or f"用户{row['user_id']}").strip()
+        name = str(
+            row["display_name"]
+            or row["remarks"]
+            or row["email"]
+            or f"用户{row['user_id']}"
+        ).strip()
         setting = dict(row)
-        result.append({"user_id": int(row["user_id"]), "name": name, "setting_label": alert_setting_label(setting, alert_type, cache_path)})
+        result.append(
+            {
+                "user_id": int(row["user_id"]),
+                "name": name,
+                "setting_label": alert_setting_label(setting, alert_type, cache_path),
+            }
+        )
     return result
+
 
 def traffic_alert_rows_sync(cache_path: Path) -> list[dict[str, Any]]:
     init_cache(cache_path)
@@ -1185,14 +1553,30 @@ def traffic_alert_rows_sync(cache_path: Path) -> list[dict[str, Any]]:
                 FROM traffic_delta_samples
                 WHERE kind = 'user' AND entity_id = ? AND sampled_at BETWEEN ? AND ?
                 """,
- (int(row["user_id"]), start_ts, end_ts),
+                (int(row["user_id"]), start_ts, end_ts),
             ).fetchone()
             threshold = int(row["traffic_threshold_bytes"] or global_threshold)
             total = int(total_row["total"] or 0)
-            rule_type = "独立规则" if row["traffic_threshold_bytes"] is not None or row["traffic_period"] is not None else "默认规则"
+            rule_type = (
+                "独立规则"
+                if row["traffic_threshold_bytes"] is not None
+                or row["traffic_period"] is not None
+                else "默认规则"
+            )
             if total > threshold:
-                alerts.append({"user_id": int(row["user_id"]), "name": str(row["name"] or ""), "total": total, "threshold": threshold, "period": period, "period_label": period_label, "rule_type": rule_type})
+                alerts.append(
+                    {
+                        "user_id": int(row["user_id"]),
+                        "name": str(row["name"] or ""),
+                        "total": total,
+                        "threshold": threshold,
+                        "period": period,
+                        "period_label": period_label,
+                        "rule_type": rule_type,
+                    }
+                )
     return alerts
+
 
 def ip_alert_rows_sync(cache_path: Path) -> list[dict[str, Any]]:
     init_cache(cache_path)
@@ -1225,22 +1609,42 @@ def ip_alert_rows_sync(cache_path: Path) -> list[dict[str, Any]]:
                 LEFT JOIN ip_geo_cache AS g ON g.ip = a.ip
                 WHERE a.user_id = ? AND a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
                 """,
- (int(row["user_id"]), start_ts, end_ts),
+                (int(row["user_id"]), start_ts, end_ts),
             ).fetchone()
             threshold = int(row["ip_city_threshold"] or global_threshold)
             city_count = int(detail["city_count"] or 0)
-            rule_type = "独立规则" if row["ip_city_threshold"] is not None or row["ip_period"] is not None else "默认规则"
+            rule_type = (
+                "独立规则"
+                if row["ip_city_threshold"] is not None or row["ip_period"] is not None
+                else "默认规则"
+            )
             if city_count > threshold:
                 cities = [c for c in str(detail["cities"] or "").split(",") if c]
-                alerts.append({"user_id": int(row["user_id"]), "name": str(row["name"] or ""), "city_count": city_count, "threshold": threshold, "period": period, "period_label": period_label, "cities": cities[:12], "rule_type": rule_type})
+                alerts.append(
+                    {
+                        "user_id": int(row["user_id"]),
+                        "name": str(row["name"] or ""),
+                        "city_count": city_count,
+                        "threshold": threshold,
+                        "period": period,
+                        "period_label": period_label,
+                        "cities": cities[:12],
+                        "rule_type": rule_type,
+                    }
+                )
     return alerts
 
-def alert_effective_rule_detail_for_user_sync(cache_path: Path, alert_type: str, user_id: int) -> tuple[str, str, int, str]:
+
+def alert_effective_rule_detail_for_user_sync(
+    cache_path: Path, alert_type: str, user_id: int
+) -> tuple[str, str, int, str]:
     init_cache(cache_path)
     global_period = alert_global_period_sync(cache_path, alert_type)
     global_threshold = alert_global_threshold_sync(cache_path, alert_type)
     with cache_connect(cache_path) as conn:
-        row = conn.execute("SELECT * FROM alert_user_settings WHERE user_id = ?", (int(user_id),)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM alert_user_settings WHERE user_id = ?", (int(user_id),)
+        ).fetchone()
     if alert_type == "traffic":
         custom_threshold = row["traffic_threshold_bytes"] if row else None
         custom_period = row["traffic_period"] if row else None
@@ -1249,14 +1653,26 @@ def alert_effective_rule_detail_for_user_sync(cache_path: Path, alert_type: str,
         custom_period = row["ip_period"] if row else None
     period = custom_period or global_period
     threshold = int(custom_threshold or global_threshold)
-    rule_type = "独立规则" if custom_threshold is not None or custom_period is not None else "默认规则"
+    rule_type = (
+        "独立规则"
+        if custom_threshold is not None or custom_period is not None
+        else "默认规则"
+    )
     return period, alert_period_label(period), threshold, rule_type
 
-def alert_effective_rule_for_user_sync(cache_path: Path, alert_type: str, user_id: int) -> tuple[str, int, str]:
-    _, period_label, threshold, rule_type = alert_effective_rule_detail_for_user_sync(cache_path, alert_type, user_id)
+
+def alert_effective_rule_for_user_sync(
+    cache_path: Path, alert_type: str, user_id: int
+) -> tuple[str, int, str]:
+    _, period_label, threshold, rule_type = alert_effective_rule_detail_for_user_sync(
+        cache_path, alert_type, user_id
+    )
     return period_label, threshold, rule_type
 
-def current_traffic_alert_value_for_user_sync(cache_path: Path, user_id: int, period: str) -> int:
+
+def current_traffic_alert_value_for_user_sync(
+    cache_path: Path, user_id: int, period: str
+) -> int:
     start_ts, end_ts, _ = alert_period_window(period, datetime.now())
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
@@ -1270,7 +1686,10 @@ def current_traffic_alert_value_for_user_sync(cache_path: Path, user_id: int, pe
         ).fetchone()
     return int(row["total"] or 0) if row else 0
 
-def current_ip_alert_detail_for_user_sync(cache_path: Path, user_id: int, period: str) -> tuple[int, list[str]]:
+
+def current_ip_alert_detail_for_user_sync(
+    cache_path: Path, user_id: int, period: str
+) -> tuple[int, list[str]]:
     start_ts, end_ts, _ = alert_period_window(period, datetime.now())
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
@@ -1289,9 +1708,11 @@ def current_ip_alert_detail_for_user_sync(cache_path: Path, user_id: int, period
     cities = [c for c in str(row["cities"] or "").split(",") if c]
     return int(row["city_count"] or 0), cities[:12]
 
+
 def alert_state_get_sync(cache_path: Path, key: str) -> str | None:
     state = get_collector_state_sync(cache_path, key)
     return state[0] if state else None
+
 
 def alert_state_set_sync(cache_path: Path, key: str, value: str) -> None:
     init_cache(cache_path)
@@ -1299,15 +1720,22 @@ def alert_state_set_sync(cache_path: Path, key: str, value: str) -> None:
     with cache_connect(cache_path) as conn:
         set_collector_state(conn, key, value, now_ts)
 
+
 def alert_state_delete_sync(cache_path: Path, key: str) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         conn.execute("DELETE FROM collector_state WHERE key = ?", (key,))
 
-def traffic_report_sent_key(kind: str, period_start: int, period_end: int, chat_id: str) -> str:
+
+def traffic_report_sent_key(
+    kind: str, period_start: int, period_end: int, chat_id: str
+) -> str:
     return f"traffic_report_sent:{kind}:{period_start}:{period_end}:{chat_id}"
 
-def mark_traffic_report_sent_sync(cache_path: Path, kind: str, period_start: int, period_end: int, chat_id: str) -> None:
+
+def mark_traffic_report_sent_sync(
+    cache_path: Path, kind: str, period_start: int, period_end: int, chat_id: str
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -1318,31 +1746,49 @@ def mark_traffic_report_sent_sync(cache_path: Path, kind: str, period_start: int
             now_ts,
         )
 
+
 def collector_health_key(service: str) -> str:
     return f"collector_health:{service}"
 
-def set_collector_health_status_sync(cache_path: Path, service: str, ok: bool, detail: str = "") -> tuple[str | None, str]:
+
+def set_collector_health_status_sync(
+    cache_path: Path, service: str, ok: bool, detail: str = ""
+) -> tuple[str | None, str]:
     """Store health status and return (previous_status, current_status)."""
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     status = "ok" if ok else "fail"
-    payload = json.dumps({"status": status, "detail": detail, "updated_at": now_ts}, ensure_ascii=False)
+    payload = json.dumps(
+        {"status": status, "detail": detail, "updated_at": now_ts}, ensure_ascii=False
+    )
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             "SELECT value FROM collector_state WHERE key = ?",
- (collector_health_key(service),),
+            (collector_health_key(service),),
         ).fetchone()
         previous_status: str | None = None
         if row:
             try:
-                previous_status = str(json.loads(str(row["value"] or "{}")).get("status") or "") or None
+                previous_status = (
+                    str(json.loads(str(row["value"] or "{}")).get("status") or "")
+                    or None
+                )
             except json.JSONDecodeError:
                 previous_status = str(row["value"] or "") or None
         set_collector_state(conn, collector_health_key(service), payload, now_ts)
     return previous_status, status
 
-def traffic_report_already_sent_sync(cache_path: Path, kind: str, period_start: int, period_end: int, chat_id: str) -> bool:
-    return get_collector_state_sync(cache_path, traffic_report_sent_key(kind, period_start, period_end, chat_id)) is not None
+
+def traffic_report_already_sent_sync(
+    cache_path: Path, kind: str, period_start: int, period_end: int, chat_id: str
+) -> bool:
+    return (
+        get_collector_state_sync(
+            cache_path, traffic_report_sent_key(kind, period_start, period_end, chat_id)
+        )
+        is not None
+    )
+
 
 def get_stats_floor_ts_sync(cache_path: Path) -> int | None:
     state = get_collector_state_sync(cache_path, "stats_floor_at")
@@ -1354,12 +1800,16 @@ def get_stats_floor_ts_sync(cache_path: Path) -> int | None:
         return None
     return value if value > 0 else None
 
+
 def effective_cache_cutoff_ts_sync(cache_path: Path, retention_days: int) -> int:
     if retention_days <= 0:
         return get_stats_floor_ts_sync(cache_path) or 0
-    retention_cutoff = int((datetime.now() - timedelta(days=retention_days)).timestamp())
+    retention_cutoff = int(
+        (datetime.now() - timedelta(days=retention_days)).timestamp()
+    )
     stats_floor = get_stats_floor_ts_sync(cache_path)
     return max(retention_cutoff, stats_floor or 0)
+
 
 def cache_retention_days_sync(cache_path: Path) -> int:
     value = alert_state_get_sync(cache_path, "cache_retention_days")
@@ -1372,40 +1822,83 @@ def cache_retention_days_sync(cache_path: Path) -> int:
             pass
     return DEFAULT_CACHE_RETENTION_DAYS
 
+
 def cache_retention_option_key(days: int) -> str:
     for key, (option_days, _) in CACHE_RETENTION_OPTIONS.items():
         if int(days) == int(option_days):
             return key
     return "1m"
 
+
 def cache_retention_label(days: int) -> str:
-    return CACHE_RETENTION_OPTIONS.get(cache_retention_option_key(days), CACHE_RETENTION_OPTIONS["1m"])[1]
+    return CACHE_RETENTION_OPTIONS.get(
+        cache_retention_option_key(days), CACHE_RETENTION_OPTIONS["1m"]
+    )[1]
+
 
 def cache_retention_cutoff_ts(days: int) -> int:
     if days <= 0:
         return 0
     return int((datetime.now() - timedelta(days=days)).timestamp())
 
+
 def cache_retention_preview_sync(cache_path: Path, days: int) -> dict[str, int]:
     init_cache(cache_path)
     cutoff_ts = cache_retention_cutoff_ts(days)
     with cache_connect(cache_path) as conn:
         if cutoff_ts <= 0:
-            counts = {"traffic_delta_samples": 0, "traffic_sample_gaps": 0, "traffic_ranges": 0, "active_ip_records": 0, "ip_geo_cache": 0}
+            counts = {
+                "traffic_delta_samples": 0,
+                "traffic_sample_gaps": 0,
+                "traffic_ranges": 0,
+                "active_ip_records": 0,
+                "ip_geo_cache": 0,
+            }
         else:
             counts = {
-                "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "ip_geo_cache": int(conn.execute("""
+                "traffic_delta_samples": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "traffic_sample_gaps": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "traffic_ranges": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "active_ip_records": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "ip_geo_cache": int(
+                    conn.execute(
+                        """
                     SELECT COUNT(*) FROM ip_geo_cache
                     WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
                       AND (queried_at = 0 OR queried_at < ?)
-                """, (cutoff_ts, cutoff_ts)).fetchone()[0] or 0),
+                """,
+                        (cutoff_ts, cutoff_ts),
+                    ).fetchone()[0]
+                    or 0
+                ),
             }
         counts["cutoff_ts"] = cutoff_ts
         return counts
+
 
 def cache_retention_set_and_prune_sync(cache_path: Path, days: int) -> dict[str, int]:
     init_cache(cache_path)
@@ -1413,32 +1906,78 @@ def cache_retention_set_and_prune_sync(cache_path: Path, days: int) -> dict[str,
     cutoff_ts = cache_retention_cutoff_ts(days)
     with cache_connect(cache_path) as conn:
         if cutoff_ts <= 0:
-            counts = {"traffic_delta_samples": 0, "traffic_sample_gaps": 0, "traffic_ranges": 0, "active_ip_records": 0, "ip_geo_cache": 0}
+            counts = {
+                "traffic_delta_samples": 0,
+                "traffic_sample_gaps": 0,
+                "traffic_ranges": 0,
+                "active_ip_records": 0,
+                "ip_geo_cache": 0,
+            }
         else:
             counts = {
-                "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)).fetchone()[0] or 0),
-                "ip_geo_cache": int(conn.execute("""
+                "traffic_delta_samples": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "traffic_sample_gaps": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "traffic_ranges": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "active_ip_records": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?",
+                        (cutoff_ts,),
+                    ).fetchone()[0]
+                    or 0
+                ),
+                "ip_geo_cache": int(
+                    conn.execute(
+                        """
                     SELECT COUNT(*) FROM ip_geo_cache
                     WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
                       AND (queried_at = 0 OR queried_at < ?)
-                """, (cutoff_ts, cutoff_ts)).fetchone()[0] or 0),
+                """,
+                        (cutoff_ts, cutoff_ts),
+                    ).fetchone()[0]
+                    or 0
+                ),
             }
-            conn.execute("DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,))
-            conn.execute("DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,))
+            conn.execute(
+                "DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)
+            )
+            conn.execute(
+                "DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)
+            )
             conn.execute("DELETE FROM traffic_ranges WHERE end_ts < ?", (cutoff_ts,))
-            conn.execute("DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,))
-            conn.execute("""
+            conn.execute(
+                "DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)
+            )
+            conn.execute(
+                """
                 DELETE FROM ip_geo_cache
                 WHERE ip NOT IN (SELECT DISTINCT ip FROM active_ip_records WHERE last_seen_at >= ?)
                   AND (queried_at = 0 OR queried_at < ?)
-            """, (cutoff_ts, cutoff_ts))
+            """,
+                (cutoff_ts, cutoff_ts),
+            )
         set_collector_state(conn, "cache_retention_days", str(int(days)), now_ts)
         set_collector_state(conn, "last_cleanup_at", str(now_ts), now_ts)
     counts["cutoff_ts"] = cutoff_ts
     return counts
+
 
 def prune_stats_before_sync(cache_path: Path, floor_ts: int) -> dict[str, int]:
     """Set local statistics floor and delete cached rows before it."""
@@ -1446,33 +1985,88 @@ def prune_stats_before_sync(cache_path: Path, floor_ts: int) -> dict[str, int]:
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
         counts = {
-            "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (floor_ts,)).fetchone()[0] or 0),
-            "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (floor_ts,)).fetchone()[0] or 0),
-            "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (floor_ts,)).fetchone()[0] or 0),
-            "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (floor_ts,)).fetchone()[0] or 0),
+            "traffic_delta_samples": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
+            "traffic_sample_gaps": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
+            "traffic_ranges": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (floor_ts,)
+                ).fetchone()[0]
+                or 0
+            ),
+            "active_ip_records": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
         }
-        conn.execute("DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (floor_ts,))
-        conn.execute("DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (floor_ts,))
+        conn.execute(
+            "DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (floor_ts,)
+        )
+        conn.execute(
+            "DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (floor_ts,)
+        )
         conn.execute("DELETE FROM traffic_ranges WHERE end_ts < ?", (floor_ts,))
-        conn.execute("DELETE FROM active_ip_records WHERE last_seen_at < ?", (floor_ts,))
+        conn.execute(
+            "DELETE FROM active_ip_records WHERE last_seen_at < ?", (floor_ts,)
+        )
         set_collector_state(conn, "stats_floor_at", str(floor_ts), now_ts)
     return counts
+
 
 def preview_prune_stats_before_sync(cache_path: Path, floor_ts: int) -> dict[str, int]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         return {
-            "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?", (floor_ts,)).fetchone()[0] or 0),
-            "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?", (floor_ts,)).fetchone()[0] or 0),
-            "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (floor_ts,)).fetchone()[0] or 0),
-            "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?", (floor_ts,)).fetchone()[0] or 0),
+            "traffic_delta_samples": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_delta_samples WHERE sampled_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
+            "traffic_sample_gaps": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_sample_gaps WHERE gap_end_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
+            "traffic_ranges": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM traffic_ranges WHERE end_ts < ?", (floor_ts,)
+                ).fetchone()[0]
+                or 0
+            ),
+            "active_ip_records": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM active_ip_records WHERE last_seen_at < ?",
+                    (floor_ts,),
+                ).fetchone()[0]
+                or 0
+            ),
         }
+
 
 def preview_clear_active_ip_records_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        row = conn.execute(
-            """
+        row = (
+            conn.execute(
+                """
             SELECT COUNT(*) AS records,
                    COUNT(DISTINCT user_id) AS users,
                    COUNT(DISTINCT ip) AS ips,
@@ -1480,14 +2074,19 @@ def preview_clear_active_ip_records_sync(cache_path: Path) -> dict[str, int]:
                    MAX(last_seen_at) AS last_seen
             FROM active_ip_records
             """
-        ).fetchone() or {}
-        geo_rows = conn.execute(
-            """
+            ).fetchone()
+            or {}
+        )
+        geo_rows = (
+            conn.execute(
+                """
             SELECT COUNT(*) AS geo_records
             FROM ip_geo_cache
             WHERE ip IN (SELECT DISTINCT ip FROM active_ip_records)
             """
-        ).fetchone() or {}
+            ).fetchone()
+            or {}
+        )
     return {
         "records": int(row["records"] or 0),
         "users": int(row["users"] or 0),
@@ -1496,6 +2095,7 @@ def preview_clear_active_ip_records_sync(cache_path: Path) -> dict[str, int]:
         "first_seen": int(row["first_seen"] or 0),
         "last_seen": int(row["last_seen"] or 0),
     }
+
 
 def clear_active_ip_records_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
@@ -1509,8 +2109,11 @@ def clear_active_ip_records_sync(cache_path: Path) -> dict[str, int]:
             """
         )
         conn.execute("DELETE FROM active_ip_records")
-        set_collector_state(conn, "last_active_ip_records_cleared_at", str(now_ts), now_ts)
+        set_collector_state(
+            conn, "last_active_ip_records_cleared_at", str(now_ts), now_ts
+        )
     return stats
+
 
 def reset_local_cache_sync(cache_path: Path) -> dict[str, int]:
     """Clear local Bot cache/samples while preserving UI preferences."""
@@ -1518,13 +2121,31 @@ def reset_local_cache_sync(cache_path: Path) -> dict[str, int]:
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
         counts = {
-            "active_ip_records": int(conn.execute("SELECT COUNT(*) FROM active_ip_records").fetchone()[0] or 0),
-            "ip_geo_cache": int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0),
+            "active_ip_records": int(
+                conn.execute("SELECT COUNT(*) FROM active_ip_records").fetchone()[0]
+                or 0
+            ),
+            "ip_geo_cache": int(
+                conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0
+            ),
             "users": int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] or 0),
-            "traffic_delta_samples": int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples").fetchone()[0] or 0),
-            "traffic_sample_gaps": int(conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps").fetchone()[0] or 0),
-            "traffic_ranges": int(conn.execute("SELECT COUNT(*) FROM traffic_ranges").fetchone()[0] or 0),
-            "pinned_dashboard_messages": int(conn.execute("SELECT COUNT(*) FROM pinned_dashboard_messages").fetchone()[0] or 0),
+            "traffic_delta_samples": int(
+                conn.execute("SELECT COUNT(*) FROM traffic_delta_samples").fetchone()[0]
+                or 0
+            ),
+            "traffic_sample_gaps": int(
+                conn.execute("SELECT COUNT(*) FROM traffic_sample_gaps").fetchone()[0]
+                or 0
+            ),
+            "traffic_ranges": int(
+                conn.execute("SELECT COUNT(*) FROM traffic_ranges").fetchone()[0] or 0
+            ),
+            "pinned_dashboard_messages": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM pinned_dashboard_messages"
+                ).fetchone()[0]
+                or 0
+            ),
         }
         for table in (
             "active_ip_records",
@@ -1545,6 +2166,7 @@ def reset_local_cache_sync(cache_path: Path) -> dict[str, int]:
         set_collector_state(conn, "initialization_reason", "cache_reset", now_ts)
     return counts
 
+
 def list_all_cached_user_buttons_sync(cache_path: Path) -> list[tuple[int, str]]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
@@ -1555,13 +2177,26 @@ def list_all_cached_user_buttons_sync(cache_path: Path) -> list[tuple[int, str]]
             ORDER BY user_id ASC
             """
         ).fetchall()
-    return [(int(row["user_id"]), cached_user_button_label(row, int(row["user_id"]))) for row in rows]
+    return [
+        (int(row["user_id"]), cached_user_button_label(row, int(row["user_id"])))
+        for row in rows
+    ]
 
-def preview_clear_user_ip_records_multi_sync(cache_path: Path, user_ids: list[int]) -> dict[str, Any]:
+
+def preview_clear_user_ip_records_multi_sync(
+    cache_path: Path, user_ids: list[int]
+) -> dict[str, Any]:
     init_cache(cache_path)
     clean_ids = sorted({int(uid) for uid in user_ids if int(uid) > 0})
     if not clean_ids:
-        return {"users": 0, "records": 0, "ips": 0, "first_seen": None, "last_seen": None, "labels": []}
+        return {
+            "users": 0,
+            "records": 0,
+            "ips": 0,
+            "first_seen": None,
+            "last_seen": None,
+            "labels": [],
+        }
     placeholders = ",".join("?" for _ in clean_ids)
     with cache_connect(cache_path) as conn:
         row = conn.execute(
@@ -1592,7 +2227,10 @@ def preview_clear_user_ip_records_multi_sync(cache_path: Path, user_ids: list[in
         "labels": labels,
     }
 
-def clear_user_ip_records_multi_sync(cache_path: Path, user_ids: list[int]) -> dict[str, Any]:
+
+def clear_user_ip_records_multi_sync(
+    cache_path: Path, user_ids: list[int]
+) -> dict[str, Any]:
     stats = preview_clear_user_ip_records_multi_sync(cache_path, user_ids)
     clean_ids = sorted({int(uid) for uid in user_ids if int(uid) > 0})
     if not clean_ids:
@@ -1608,31 +2246,65 @@ def clear_user_ip_records_multi_sync(cache_path: Path, user_ids: list[int]) -> d
             """,
             [now_ts, "debug_reset_user_ip", "调试功能：清空用户 IP 记录", *clean_ids],
         )
-        active_ips = int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
-        previous_row = conn.execute("SELECT value FROM collector_state WHERE key = ?", ("ip_alert_active_users",)).fetchone()
+        active_ips = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
+        previous_row = conn.execute(
+            "SELECT value FROM collector_state WHERE key = ?",
+            ("ip_alert_active_users",),
+        ).fetchone()
         previous_raw = str(previous_row["value"]) if previous_row else "{}"
         try:
             previous = json.loads(previous_raw)
             if isinstance(previous, dict):
                 for user_id_value in clean_ids:
                     previous.pop(str(user_id_value), None)
-                set_collector_state(conn, "ip_alert_active_users", json.dumps(previous, sort_keys=True), now_ts)
+                set_collector_state(
+                    conn,
+                    "ip_alert_active_users",
+                    json.dumps(previous, sort_keys=True),
+                    now_ts,
+                )
         except (TypeError, ValueError):
             pass
-        set_collector_state(conn, "last_active_ip_records_cleared_at", str(now_ts), now_ts)
+        set_collector_state(
+            conn, "last_active_ip_records_cleared_at", str(now_ts), now_ts
+        )
     stats["remaining_active_ips"] = active_ips
     stats["ignored"] = int(cursor.rowcount or 0)
     return stats
 
+
 def get_cache_counts_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        active_ip_records = int(conn.execute("SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
-        active_ips = int(conn.execute("SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
+        active_ip_records = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
+        active_ips = int(
+            conn.execute(
+                "SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
         users = int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] or 0)
-        geo_total = int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0)
-        traffic_samples = int(conn.execute("SELECT COUNT(*) FROM traffic_delta_samples").fetchone()[0] or 0)
-        pinned_dashboards = int(conn.execute("SELECT COUNT(*) FROM pinned_dashboard_messages").fetchone()[0] or 0)
+        geo_total = int(
+            conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0
+        )
+        traffic_samples = int(
+            conn.execute("SELECT COUNT(*) FROM traffic_delta_samples").fetchone()[0]
+            or 0
+        )
+        pinned_dashboards = int(
+            conn.execute("SELECT COUNT(*) FROM pinned_dashboard_messages").fetchone()[0]
+            or 0
+        )
     return {
         "active_ips": active_ips,
         "active_ip_records": active_ip_records,
@@ -1642,13 +2314,18 @@ def get_cache_counts_sync(cache_path: Path) -> dict[str, int]:
         "pinned_dashboards": pinned_dashboards,
     }
 
-def upsert_cache_records(cache_path: Path, records: list[tuple[int, str, int, int, str]], retention_days: int) -> set[int]:
+
+def upsert_cache_records(
+    cache_path: Path, records: list[tuple[int, str, int, int, str]], retention_days: int
+) -> set[int]:
     now_ts = int(datetime.now().timestamp())
     cutoff_ts = effective_cache_cutoff_ts_sync(cache_path, retention_days)
     user_ids = {user_id for user_id, *_ in records}
     ips = {ip for _, ip, *_ in records}
     with cache_connect(cache_path) as conn:
-        first_state = conn.execute("SELECT value FROM collector_state WHERE key = ?", ("first_collect_at",)).fetchone()
+        first_state = conn.execute(
+            "SELECT value FROM collector_state WHERE key = ?", ("first_collect_at",)
+        ).fetchone()
         if not first_state:
             set_collector_state(conn, "first_collect_at", str(now_ts), now_ts)
         conn.executemany(
@@ -1660,7 +2337,10 @@ def upsert_cache_records(cache_path: Path, records: list[tuple[int, str, int, in
                 last_ttl = excluded.last_ttl,
                 source_key = excluded.source_key
             """,
- ((user_id, ip, last_seen_ts, last_seen_ts, ttl, source_key) for user_id, ip, last_seen_ts, ttl, source_key in records),
+            (
+                (user_id, ip, last_seen_ts, last_seen_ts, ttl, source_key)
+                for user_id, ip, last_seen_ts, ttl, source_key in records
+            ),
         )
         conn.executemany(
             """
@@ -1668,16 +2348,21 @@ def upsert_cache_records(cache_path: Path, records: list[tuple[int, str, int, in
             VALUES (?, 0)
             ON CONFLICT(ip) DO NOTHING
             """,
- ((ip,) for ip in ips),
+            ((ip,) for ip in ips),
         )
         apply_ignored_rules_conn(conn, now_ts)
-        conn.execute("DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,))
+        conn.execute(
+            "DELETE FROM active_ip_records WHERE last_seen_at < ?", (cutoff_ts,)
+        )
         set_collector_state(conn, "last_collect_at", str(now_ts), now_ts)
         set_collector_state(conn, "last_collect_attempt_at", str(now_ts), now_ts)
         set_collector_state(conn, "last_cleanup_at", str(now_ts), now_ts)
     return user_ids
 
-def upsert_cache_users(cache_path: Path, mysql_cfg: MySQLConfig, user_ids: set[int]) -> None:
+
+def upsert_cache_users(
+    cache_path: Path, mysql_cfg: MySQLConfig, user_ids: set[int]
+) -> None:
     if not user_ids:
         return
     names = fetch_user_display_details_sync(mysql_cfg, user_ids)
@@ -1693,10 +2378,16 @@ def upsert_cache_users(cache_path: Path, mysql_cfg: MySQLConfig, user_ids: set[i
                 email=excluded.email,
                 updated_at=excluded.updated_at
             """,
- ((user_id, row["display_name"], row["remarks"], row["email"], now_ts) for user_id, row in names.items()),
+            (
+                (user_id, row["display_name"], row["remarks"], row["email"], now_ts)
+                for user_id, row in names.items()
+            ),
         )
 
-def pinned_dashboard_set_sync(cache_path: Path, kind: str, chat_id: str, message_id: int, is_pinned: bool) -> None:
+
+def pinned_dashboard_set_sync(
+    cache_path: Path, kind: str, chat_id: str, message_id: int, is_pinned: bool
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -1709,13 +2400,18 @@ def pinned_dashboard_set_sync(cache_path: Path, kind: str, chat_id: str, message
                 is_pinned=excluded.is_pinned,
                 updated_at=excluded.updated_at
             """,
- (kind, chat_id, message_id, 1 if is_pinned else 0, now_ts),
+            (kind, chat_id, message_id, 1 if is_pinned else 0, now_ts),
         )
+
 
 def pinned_dashboard_delete_sync(cache_path: Path, kind: str, chat_id: str) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        conn.execute("DELETE FROM pinned_dashboard_messages WHERE kind = ? AND chat_id = ?", (kind, chat_id))
+        conn.execute(
+            "DELETE FROM pinned_dashboard_messages WHERE kind = ? AND chat_id = ?",
+            (kind, chat_id),
+        )
+
 
 def pinned_dashboard_all_sync(cache_path: Path) -> list[dict[str, Any]]:
     init_cache(cache_path)
@@ -1729,12 +2425,21 @@ def pinned_dashboard_all_sync(cache_path: Path) -> list[dict[str, Any]]:
         ).fetchall()
     return [dict(row) for row in rows]
 
-def pinned_dashboard_delete_message_sync(cache_path: Path, chat_id: str, message_id: int) -> None:
+
+def pinned_dashboard_delete_message_sync(
+    cache_path: Path, chat_id: str, message_id: int
+) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        conn.execute("DELETE FROM pinned_dashboard_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
+        conn.execute(
+            "DELETE FROM pinned_dashboard_messages WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        )
 
-def auto_delete_message_set_sync(cache_path: Path, chat_id: str, message_id: int, is_pinned: bool) -> None:
+
+def auto_delete_message_set_sync(
+    cache_path: Path, chat_id: str, message_id: int, is_pinned: bool
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -1746,30 +2451,47 @@ def auto_delete_message_set_sync(cache_path: Path, chat_id: str, message_id: int
                 is_pinned=excluded.is_pinned,
                 updated_at=excluded.updated_at
             """,
- (chat_id, message_id, 1 if is_pinned else 0, now_ts),
+            (chat_id, message_id, 1 if is_pinned else 0, now_ts),
         )
 
-def auto_delete_message_is_pinned_sync(cache_path: Path, chat_id: str, message_id: int) -> bool:
+
+def auto_delete_message_is_pinned_sync(
+    cache_path: Path, chat_id: str, message_id: int
+) -> bool:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             "SELECT is_pinned FROM dashboard_auto_delete_messages WHERE chat_id = ? AND message_id = ?",
- (chat_id, message_id),
+            (chat_id, message_id),
         ).fetchone()
     return bool(row and int(row["is_pinned"] or 0))
 
-def auto_delete_message_delete_sync(cache_path: Path, chat_id: str, message_id: int) -> None:
+
+def auto_delete_message_delete_sync(
+    cache_path: Path, chat_id: str, message_id: int
+) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        conn.execute("DELETE FROM dashboard_auto_delete_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
+        conn.execute(
+            "DELETE FROM dashboard_auto_delete_messages WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        )
+
 
 def clear_message_tracking_for_chat_sync(cache_path: Path, chat_id: str) -> None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        conn.execute("DELETE FROM pinned_dashboard_messages WHERE chat_id = ?", (chat_id,))
-        conn.execute("DELETE FROM dashboard_auto_delete_messages WHERE chat_id = ?", (chat_id,))
+        conn.execute(
+            "DELETE FROM pinned_dashboard_messages WHERE chat_id = ?", (chat_id,)
+        )
+        conn.execute(
+            "DELETE FROM dashboard_auto_delete_messages WHERE chat_id = ?", (chat_id,)
+        )
 
-def auto_delete_due_messages_sync(cache_path: Path, older_than_ts: int) -> list[dict[str, Any]]:
+
+def auto_delete_due_messages_sync(
+    cache_path: Path, older_than_ts: int
+) -> list[dict[str, Any]]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
@@ -1779,11 +2501,14 @@ def auto_delete_due_messages_sync(cache_path: Path, older_than_ts: int) -> list[
             WHERE is_pinned = 0 AND updated_at <= ?
             ORDER BY updated_at ASC
             """,
- (older_than_ts,),
+            (older_than_ts,),
         ).fetchall()
     return [dict(row) for row in rows]
 
-def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int, int, int, int, int, int]:
+
+def sample_traffic_deltas_sync(
+    cache_path: Path, cfg: MySQLConfig
+) -> tuple[int, int, int, int, int, int]:
     """Store per-minute traffic deltas. Returns (users, nodes, deltas, gap_seconds, previous_ts, current_ts)."""
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
@@ -1799,7 +2524,7 @@ def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int,
     with cache_connect(cache_path) as conn:
         previous_sample = conn.execute(
             "SELECT value FROM collector_state WHERE key = ?",
- ("last_traffic_sample_at",),
+            ("last_traffic_sample_at",),
         ).fetchone()
         if previous_sample:
             previous_ts = int(previous_sample["value"] or 0)
@@ -1810,18 +2535,22 @@ def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int,
                     INSERT OR IGNORE INTO traffic_sample_gaps(gap_start_at, gap_end_at, gap_seconds, detected_at)
                     VALUES (?, ?, ?, ?)
                     """,
- (previous_ts, now_ts, gap_seconds, now_ts),
+                    (previous_ts, now_ts, gap_seconds, now_ts),
                 )
         for kind, rows in (("user", user_rows), ("node", node_rows)):
             for row in rows:
                 entity_id = int(row.get("entity_id") or 0)
                 if entity_id <= 0:
                     continue
-                name = str(row.get("name") or f"{kind}{entity_id}").strip().replace("\n", " ")[:160]
+                name = (
+                    str(row.get("name") or f"{kind}{entity_id}")
+                    .strip()
+                    .replace("\n", " ")[:160]
+                )
                 total = max(0, int(row.get("total") or 0))
                 previous = conn.execute(
                     "SELECT total FROM traffic_counter_snapshots WHERE kind = ? AND entity_id = ?",
- (kind, entity_id),
+                    (kind, entity_id),
                 ).fetchone()
                 if previous is None:
                     delta = 0
@@ -1834,7 +2563,7 @@ def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int,
                         INSERT INTO traffic_delta_samples(sampled_at, kind, entity_id, name, delta)
                         VALUES (?, ?, ?, ?, ?)
                         """,
- (now_ts, kind, entity_id, name, delta),
+                        (now_ts, kind, entity_id, name, delta),
                     )
                     delta_rows += 1
                 conn.execute(
@@ -1846,29 +2575,38 @@ def sample_traffic_deltas_sync(cache_path: Path, cfg: MySQLConfig) -> tuple[int,
                         total=excluded.total,
                         sampled_at=excluded.sampled_at
                     """,
- (kind, entity_id, name, total, now_ts),
+                    (kind, entity_id, name, total, now_ts),
                 )
-        conn.execute("DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,))
-        conn.execute("DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,))
+        conn.execute(
+            "DELETE FROM traffic_delta_samples WHERE sampled_at < ?", (cutoff_ts,)
+        )
+        conn.execute(
+            "DELETE FROM traffic_sample_gaps WHERE gap_end_at < ?", (cutoff_ts,)
+        )
         set_collector_state(conn, "last_traffic_sample_at", str(now_ts), now_ts)
     return len(user_rows), len(node_rows), delta_rows, gap_seconds, previous_ts, now_ts
+
 
 def earliest_traffic_sample_at_sync(cache_path: Path) -> int | None:
     init_cache(cache_path)
     floor_ts = get_stats_floor_ts_sync(cache_path) or 0
     with cache_connect(cache_path) as conn:
-        row = conn.execute(
-            """
+        row = (
+            conn.execute(
+                """
             SELECT MIN(sampled_at) AS first_sample FROM (
                 SELECT sampled_at FROM traffic_delta_samples
                 UNION ALL
                 SELECT sampled_at FROM traffic_counter_snapshots
             )
             WHERE sampled_at >= ?
-            """
-            , (floor_ts,)
-        ).fetchone() or {}
+            """,
+                (floor_ts,),
+            ).fetchone()
+            or {}
+        )
     return int(row["first_sample"]) if row and row["first_sample"] is not None else None
+
 
 def query_traffic_deltas_range_from_cache_sync(
     cache_path: Path,
@@ -1882,14 +2620,17 @@ def query_traffic_deltas_range_from_cache_sync(
     dimension = dimension if dimension in {"combined", "users", "nodes"} else "combined"
     total_kind = "node" if dimension == "nodes" else "user"
     with cache_connect(cache_path) as conn:
-        total_row = conn.execute(
-            """
+        total_row = (
+            conn.execute(
+                """
             SELECT COALESCE(SUM(delta), 0) AS total
             FROM traffic_delta_samples
             WHERE sampled_at BETWEEN ? AND ? AND kind = ?
             """,
- (start_ts, end_ts, total_kind),
-        ).fetchone() or {}
+                (start_ts, end_ts, total_kind),
+            ).fetchone()
+            or {}
+        )
         user_rows = []
         node_rows = []
         if dimension in {"combined", "users"}:
@@ -1902,7 +2643,7 @@ def query_traffic_deltas_range_from_cache_sync(
                 ORDER BY total DESC
                 LIMIT ?
                 """.replace("CONCAT('用户', entity_id)", "'用户' || entity_id"),
- (start_ts, end_ts, safe_limit),
+                (start_ts, end_ts, safe_limit),
             ).fetchall()
         if dimension in {"combined", "nodes"}:
             node_rows = conn.execute(
@@ -1914,11 +2655,19 @@ def query_traffic_deltas_range_from_cache_sync(
                 ORDER BY total DESC
                 LIMIT ?
                 """,
- (start_ts, end_ts, safe_limit),
+                (start_ts, end_ts, safe_limit),
             ).fetchall()
-    return int(total_row["total"] or 0), [dict(r) for r in user_rows], [dict(r) for r in node_rows], earliest_traffic_sample_at_sync(cache_path)
+    return (
+        int(total_row["total"] or 0),
+        [dict(r) for r in user_rows],
+        [dict(r) for r in node_rows],
+        earliest_traffic_sample_at_sync(cache_path),
+    )
 
-def traffic_sample_gap_warning_for_range_sync(cache_path: Path, start_ts: int, end_ts: int, period_label: str) -> str | None:
+
+def traffic_sample_gap_warning_for_range_sync(
+    cache_path: Path, start_ts: int, end_ts: int, period_label: str
+) -> str | None:
     """Return a warning only when a sampling gap crosses a stats boundary.
 
     Traffic totals are calculated from cumulative counter deltas. A gap fully
@@ -1936,10 +2685,11 @@ def traffic_sample_gap_warning_for_range_sync(cache_path: Path, start_ts: int, e
             WHERE gap_start_at < ? AND gap_end_at > ?
             ORDER BY gap_seconds DESC, gap_end_at DESC
             """,
- (end_ts, start_ts),
+            (end_ts, start_ts),
         ).fetchall()
     boundary_rows = [
-        row for row in rows
+        row
+        for row in rows
         if int(row["gap_start_at"] or 0) < start_ts < int(row["gap_end_at"] or 0)
         or int(row["gap_start_at"] or 0) < end_ts < int(row["gap_end_at"] or 0)
     ]
@@ -1959,22 +2709,31 @@ def traffic_sample_gap_warning_for_range_sync(cache_path: Path, start_ts: int, e
         "由于累计值可能被记入相邻窗口，本周期流量可能存在边界偏差。"
     )
 
-def ip_alert_row_for_user_sync(cache_path: Path, xboard_user_id: int) -> dict[str, Any] | None:
+
+def ip_alert_row_for_user_sync(
+    cache_path: Path, xboard_user_id: int
+) -> dict[str, Any] | None:
     for row in ip_alert_rows_sync(cache_path):
         if int(row.get("user_id") or 0) == int(xboard_user_id):
             return row
     return None
 
-def traffic_range_kind_from_cache_sync(cache_path: Path, kind: str) -> dict[str, Any] | None:
+
+def traffic_range_kind_from_cache_sync(
+    cache_path: Path, kind: str
+) -> dict[str, Any] | None:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         row = conn.execute(
             "SELECT kind, start_ts, end_ts, label, created_at FROM traffic_ranges WHERE kind = ?",
- (kind,),
+            (kind,),
         ).fetchone()
     return dict(row) if row else None
 
-def save_traffic_range_sync(cache_path: Path, kind: str, start_ts: int, end_ts: int, label: str) -> None:
+
+def save_traffic_range_sync(
+    cache_path: Path, kind: str, start_ts: int, end_ts: int, label: str
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -1988,12 +2747,16 @@ def save_traffic_range_sync(cache_path: Path, kind: str, start_ts: int, end_ts: 
                 label=excluded.label,
                 created_at=excluded.created_at
             """,
- (kind, start_ts, end_ts, label, now_ts),
+            (kind, start_ts, end_ts, label, now_ts),
         )
 
+
 def make_range_kind(start_ts: int, end_ts: int, label: str) -> str:
-    digest = hashlib.sha1(f"{start_ts}:{end_ts}:{label}".encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(f"{start_ts}:{end_ts}:{label}".encode("utf-8")).hexdigest()[
+        :12
+    ]
     return f"range_{digest}"
+
 
 def traffic_dimension_from_kind(kind: str) -> str:
     if kind.startswith("users_"):
@@ -2002,6 +2765,7 @@ def traffic_dimension_from_kind(kind: str) -> str:
         return "nodes"
     return "combined"
 
+
 def traffic_base_kind(kind: str) -> str:
     if kind.startswith("users_"):
         base = kind.removeprefix("users_")
@@ -2009,8 +2773,14 @@ def traffic_base_kind(kind: str) -> str:
         base = kind.removeprefix("nodes_")
     else:
         base = kind
-    legacy_periods = {"1h": "preset_1h", "24h": "preset_24h", "7d": "preset_7d", "30d": "preset_30d"}
+    legacy_periods = {
+        "1h": "preset_1h",
+        "24h": "preset_24h",
+        "7d": "preset_7d",
+        "30d": "preset_30d",
+    }
     return legacy_periods.get(base, base)
+
 
 def traffic_kind_for_dimension(dimension: str, base_kind: str) -> str:
     dimension = dimension if dimension in {"combined", "users", "nodes"} else "combined"
@@ -2019,6 +2789,7 @@ def traffic_kind_for_dimension(dimension: str, base_kind: str) -> str:
     if dimension == "nodes":
         return f"nodes_{base_kind}"
     return base_kind
+
 
 def upsert_all_cache_users(cache_path: Path, mysql_cfg: MySQLConfig) -> None:
     names = fetch_all_user_display_details_sync(mysql_cfg)
@@ -2037,15 +2808,17 @@ def upsert_all_cache_users(cache_path: Path, mysql_cfg: MySQLConfig) -> None:
                     email=excluded.email,
                     updated_at=excluded.updated_at
                 """,
- (user_id, row["display_name"], row["remarks"], row["email"], now_ts),
+                (user_id, row["display_name"], row["remarks"], row["email"], now_ts),
             )
+
 
 def earliest_cache_collect_at_sync(cache_path: Path) -> int | None:
     init_cache(cache_path)
     floor_ts = get_stats_floor_ts_sync(cache_path) or 0
     with cache_connect(cache_path) as conn:
-        row = conn.execute(
-            """
+        row = (
+            conn.execute(
+                """
             SELECT MIN(ts) AS first_ts FROM (
                 SELECT first_seen_at AS ts FROM active_ip_records WHERE first_seen_at > 0
                 UNION ALL
@@ -2055,9 +2828,12 @@ def earliest_cache_collect_at_sync(cache_path: Path) -> int | None:
             )
             WHERE ts >= ?
             """,
- (floor_ts,),
-        ).fetchone() or {}
+                (floor_ts,),
+            ).fetchone()
+            or {}
+        )
     return int(row["first_ts"]) if row and row["first_ts"] is not None else None
+
 
 def cached_active_user_rows_between(
     cache_path: Path,
@@ -2077,7 +2853,7 @@ def cached_active_user_rows_between(
             WHERE a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
             ORDER BY a.user_id ASC, a.last_seen_at DESC, a.ip ASC
             """,
- (start_ts, end_ts),
+            (start_ts, end_ts),
         ).fetchall()
 
     grouped: dict[int, list[sqlite3.Row]] = {}
@@ -2089,9 +2865,13 @@ def cached_active_user_rows_between(
     ordered_user_ids = sorted(grouped, key=lambda uid: (-len(grouped[uid]), uid))
     return ordered_user_ids, grouped, user_rows
 
-def cached_active_user_rows(cache_path: Path, window: timedelta) -> tuple[list[int], dict[int, list[sqlite3.Row]], dict[int, sqlite3.Row]]:
+
+def cached_active_user_rows(
+    cache_path: Path, window: timedelta
+) -> tuple[list[int], dict[int, list[sqlite3.Row]], dict[int, sqlite3.Row]]:
     cutoff_ts = int((datetime.now() - window).timestamp())
     return cached_active_user_rows_between(cache_path, cutoff_ts)
+
 
 def active_user_button_items_from_cache_sync(
     cache_path: Path,
@@ -2100,12 +2880,20 @@ def active_user_button_items_from_cache_sync(
     end_ts: int | None = None,
 ) -> list[tuple[int, str]]:
     if start_ts is not None:
-        ordered_user_ids, _grouped, user_rows = cached_active_user_rows_between(cache_path, start_ts, end_ts)
+        ordered_user_ids, _grouped, user_rows = cached_active_user_rows_between(
+            cache_path, start_ts, end_ts
+        )
     elif window is not None:
-        ordered_user_ids, _grouped, user_rows = cached_active_user_rows(cache_path, window)
+        ordered_user_ids, _grouped, user_rows = cached_active_user_rows(
+            cache_path, window
+        )
     else:
         ordered_user_ids, _grouped, user_rows = [], {}, {}
-    return [(user_id, cached_user_button_label(user_rows.get(user_id), user_id)[:48]) for user_id in ordered_user_ids]
+    return [
+        (user_id, cached_user_button_label(user_rows.get(user_id), user_id)[:48])
+        for user_id in ordered_user_ids
+    ]
+
 
 def list_user_ips_from_cache_sync(
     cache_path: Path,
@@ -2115,9 +2903,13 @@ def list_user_ips_from_cache_sync(
     end_ts: int | None = None,
 ) -> str:
     if start_ts is not None:
-        ordered_user_ids, grouped, user_rows = cached_active_user_rows_between(cache_path, start_ts, end_ts)
+        ordered_user_ids, grouped, user_rows = cached_active_user_rows_between(
+            cache_path, start_ts, end_ts
+        )
     elif window is not None:
-        ordered_user_ids, grouped, user_rows = cached_active_user_rows(cache_path, window)
+        ordered_user_ids, grouped, user_rows = cached_active_user_rows(
+            cache_path, window
+        )
     else:
         ordered_user_ids, grouped, user_rows = [], {}, {}
 
@@ -2133,20 +2925,24 @@ def list_user_ips_from_cache_sync(
             "────────────",
         ]
     if not ordered_user_ids:
-        lines.extend([
-            f"暂无 {label} 在线 IP 记录。",
-            "",
-            "缓存可能尚未完成首次采集，请稍后再试。",
-        ])
+        lines.extend(
+            [
+                f"暂无 {label} 在线 IP 记录。",
+                "",
+                "缓存可能尚未完成首次采集，请稍后再试。",
+            ]
+        )
     else:
         all_rows = [row for user_id in ordered_user_ids for row in grouped[user_id]]
-        lines.extend([
-            f"👥 活跃用户：{len(grouped)} 个",
-            f"🌐 活跃 IP：{len(all_rows)} 个",
-            f"📍 活跃地区：{count_geo_areas(all_rows)} 个",
-            "",
-            f"🗺 活跃用户<b> Top {len(grouped)}</b>",
-        ])
+        lines.extend(
+            [
+                f"👥 活跃用户：{len(grouped)} 个",
+                f"🌐 活跃 IP：{len(all_rows)} 个",
+                f"📍 活跃地区：{count_geo_areas(all_rows)} 个",
+                "",
+                f"🗺 活跃用户<b> Top {len(grouped)}</b>",
+            ]
+        )
         for xboard_user_id in ordered_user_ids:
             user_ip_rows = grouped[xboard_user_id]
             lines.append(
@@ -2157,6 +2953,7 @@ def list_user_ips_from_cache_sync(
     if len(result) > 3900:
         result = result[:3850].rstrip() + "\n\n……内容过长，已截断。"
     return result
+
 
 def count_user_ips_from_cache_sync(
     cache_path: Path,
@@ -2177,14 +2974,15 @@ def count_user_ips_from_cache_sync(
                 FROM active_ip_records
                 WHERE user_id = ? AND ignored_at IS NULL AND last_seen_at BETWEEN ? AND ?
                 """,
- (xboard_user_id, start_ts, end_ts),
+                (xboard_user_id, start_ts, end_ts),
             ).fetchone()
         else:
             row = conn.execute(
                 "SELECT COUNT(DISTINCT ip) AS total FROM active_ip_records WHERE user_id = ? AND ignored_at IS NULL",
- (xboard_user_id,),
+                (xboard_user_id,),
             ).fetchone()
     return int(row["total"] if row and row["total"] is not None else 0)
+
 
 def query_user_ips_from_cache_sync(
     cache_path: Path,
@@ -2198,7 +2996,9 @@ def query_user_ips_from_cache_sync(
 ) -> str:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        user_row = conn.execute("SELECT display_name FROM users WHERE user_id = ?", (xboard_user_id,)).fetchone()
+        user_row = conn.execute(
+            "SELECT display_name FROM users WHERE user_id = ?", (xboard_user_id,)
+        ).fetchone()
         rows = conn.execute(
             """
             SELECT a.ip, a.last_seen_at, g.country, g.region, g.city, g.district, g.isp, g.stat_area_key, g.stat_area_name, g.stat_area_level, g.raw
@@ -2207,14 +3007,16 @@ def query_user_ips_from_cache_sync(
             WHERE a.user_id = ? AND a.ignored_at IS NULL
             ORDER BY a.last_seen_at DESC, a.ip ASC
             """,
- (xboard_user_id,),
+            (xboard_user_id,),
         ).fetchall()
 
     if label and (window or start_ts is not None):
         if start_ts is None:
             start_ts = int((datetime.now() - window).timestamp()) if window else 0
         end_ts = end_ts or int(datetime.now().timestamp())
-        filtered_rows = [row for row in rows if start_ts <= int(row["last_seen_at"]) <= end_ts]
+        filtered_rows = [
+            row for row in rows if start_ts <= int(row["last_seen_at"]) <= end_ts
+        ]
         return render_user_ip_rows_page(
             render_cached_user_label(user_row, xboard_user_id),
             label,
@@ -2226,18 +3028,41 @@ def query_user_ips_from_cache_sync(
         )
     else:
         now = datetime.now()
-        lines = [f"👤 {render_cached_user_label(user_row, xboard_user_id)}", "────────────", ""]
+        lines = [
+            f"👤 {render_cached_user_label(user_row, xboard_user_id)}",
+            "────────────",
+            "",
+        ]
         shown_ips: set[str] = set()
-        lines.extend(render_cached_ip_bucket("近 1 小时", rows, shown_ips, int((now - timedelta(hours=1)).timestamp())))
+        lines.extend(
+            render_cached_ip_bucket(
+                "近 1 小时",
+                rows,
+                shown_ips,
+                int((now - timedelta(hours=1)).timestamp()),
+            )
+        )
         lines.append("")
-        lines.extend(render_cached_ip_bucket("近 24 小时", rows, shown_ips, int((now - timedelta(hours=24)).timestamp())))
+        lines.extend(
+            render_cached_ip_bucket(
+                "近 24 小时",
+                rows,
+                shown_ips,
+                int((now - timedelta(hours=24)).timestamp()),
+            )
+        )
         lines.append("")
-        lines.extend(render_cached_ip_bucket("近 7 天", rows, shown_ips, int((now - timedelta(days=7)).timestamp())))
+        lines.extend(
+            render_cached_ip_bucket(
+                "近 7 天", rows, shown_ips, int((now - timedelta(days=7)).timestamp())
+            )
+        )
 
     result = "\n".join(lines).strip()
     if len(result) > 3900:
         result = result[:3850].rstrip() + "\n\n……内容过长，已截断。"
     return result
+
 
 def user_ip_page_rows_sync(
     cache_path: Path,
@@ -2260,34 +3085,49 @@ def user_ip_page_rows_sync(
             WHERE a.user_id = ? AND a.ignored_at IS NULL AND a.last_seen_at BETWEEN ? AND ?
             ORDER BY a.last_seen_at DESC, a.ip ASC
             """,
- (xboard_user_id, start_ts, end_ts or int(datetime.now().timestamp())),
+            (xboard_user_id, start_ts, end_ts or int(datetime.now().timestamp())),
         ).fetchall()
     safe_page_size = max(1, min(page_size, 50))
     safe_page = max(0, page)
-    return rows[safe_page * safe_page_size:(safe_page + 1) * safe_page_size]
+    return rows[safe_page * safe_page_size : (safe_page + 1) * safe_page_size]
 
-def user_ip_ignore_items_sync(cache_path: Path, xboard_user_id: int, kind: str, page: int, dimension: str) -> list[dict[str, Any]]:
-    return ignore_items_from_ip_rows(user_ip_page_rows_sync(cache_path, xboard_user_id, kind, page), dimension)
+
+def user_ip_ignore_items_sync(
+    cache_path: Path, xboard_user_id: int, kind: str, page: int, dimension: str
+) -> list[dict[str, Any]]:
+    return ignore_items_from_ip_rows(
+        user_ip_page_rows_sync(cache_path, xboard_user_id, kind, page), dimension
+    )
+
 
 def ignored_rule_count_sync(cache_path: Path) -> int:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        return int(conn.execute("SELECT COUNT(*) FROM ignored_ip_rules").fetchone()[0] or 0)
+        return int(
+            conn.execute("SELECT COUNT(*) FROM ignored_ip_rules").fetchone()[0] or 0
+        )
+
 
 def ignored_rule_counts_by_dimension_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
     counts = {"area": 0, "asn": 0, "cidr": 0}
     with cache_connect(cache_path) as conn:
-        rows = conn.execute("SELECT dimension, COUNT(*) AS c FROM ignored_ip_rules WHERE dimension IN ('area', 'asn', 'cidr') GROUP BY dimension").fetchall()
+        rows = conn.execute(
+            "SELECT dimension, COUNT(*) AS c FROM ignored_ip_rules WHERE dimension IN ('area', 'asn', 'cidr') GROUP BY dimension"
+        ).fetchall()
     for row in rows:
         counts[str(row["dimension"])] = int(row["c"] or 0)
     return counts
 
+
 def ignored_rule_values_sync(cache_path: Path, dimension: str) -> set[str]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        rows = conn.execute("SELECT value FROM ignored_ip_rules WHERE dimension = ?", (dimension,)).fetchall()
+        rows = conn.execute(
+            "SELECT value FROM ignored_ip_rules WHERE dimension = ?", (dimension,)
+        ).fetchall()
     return {str(row["value"] or "") for row in rows}
+
 
 def ignored_rule_items_sync(cache_path: Path) -> list[dict[str, Any]]:
     init_cache(cache_path)
@@ -2302,7 +3142,9 @@ def ignored_rule_items_sync(cache_path: Path) -> list[dict[str, Any]]:
         ).fetchall()
         asn_labels: dict[str, str] = {}
         if any(str(row["dimension"] or "") == "asn" for row in rows):
-            geo_rows = conn.execute("SELECT raw FROM ip_geo_cache WHERE raw IS NOT NULL AND raw != ''").fetchall()
+            geo_rows = conn.execute(
+                "SELECT raw FROM ip_geo_cache WHERE raw IS NOT NULL AND raw != ''"
+            ).fetchall()
             for geo_row in geo_rows:
                 raw = raw_geo_data(geo_row)
                 key = asn_key_from_raw(raw)
@@ -2323,8 +3165,17 @@ def ignored_rule_items_sync(cache_path: Path) -> list[dict[str, Any]]:
             dim_label = "🌐"
         else:
             continue
-        items.append({"dimension": dimension, "value": value, "label": label, "sub": dim_label, "updated_at": int(row["updated_at"] or row["created_at"] or 0)})
+        items.append(
+            {
+                "dimension": dimension,
+                "value": value,
+                "label": label,
+                "sub": dim_label,
+                "updated_at": int(row["updated_at"] or row["created_at"] or 0),
+            }
+        )
     return items
+
 
 def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, Any]]:
     init_cache(cache_path)
@@ -2348,7 +3199,14 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 if not key:
                     continue
                 label = geo_area_display_label(row, key)
-                items.append({"value": key, "label": label, "sub": f"{int(row['ip_count'] or 0)} IP / {int(row['user_count'] or 0)} 用户", "last_seen_at": int(row["last_seen_at"] or 0)})
+                items.append(
+                    {
+                        "value": key,
+                        "label": label,
+                        "sub": f"{int(row['ip_count'] or 0)} IP / {int(row['user_count'] or 0)} 用户",
+                        "last_seen_at": int(row["last_seen_at"] or 0),
+                    }
+                )
             return items
         if dimension == "asn":
             rows = conn.execute(
@@ -2366,13 +3224,32 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 key = asn_key_from_raw(raw)
                 if not key:
                     continue
-                bucket = buckets.setdefault(key, {"value": key, "label": asn_label_from_raw(raw) or key, "ips": set(), "users": set(), "last_seen_at": 0})
+                bucket = buckets.setdefault(
+                    key,
+                    {
+                        "value": key,
+                        "label": asn_label_from_raw(raw) or key,
+                        "ips": set(),
+                        "users": set(),
+                        "last_seen_at": 0,
+                    },
+                )
                 bucket["ips"].add(str(row["ip"]))
                 bucket["users"].add(int(row["user_id"]))
-                bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
+                bucket["last_seen_at"] = max(
+                    int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0)
+                )
             return [
-                {"value": key, "label": str(bucket["label"]), "sub": f"{len(bucket['ips'])} IP / {len(bucket['users'])} 用户", "last_seen_at": int(bucket["last_seen_at"])}
-                for key, bucket in sorted(buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
+                {
+                    "value": key,
+                    "label": str(bucket["label"]),
+                    "sub": f"{len(bucket['ips'])} IP / {len(bucket['users'])} 用户",
+                    "last_seen_at": int(bucket["last_seen_at"]),
+                }
+                for key, bucket in sorted(
+                    buckets.items(),
+                    key=lambda item: (-int(item[1]["last_seen_at"]), item[0]),
+                )
             ]
         if dimension == "cidr":
             rows = conn.execute(
@@ -2387,15 +3264,35 @@ def ignored_list_items_sync(cache_path: Path, dimension: str) -> list[dict[str, 
                 cidr = ipv4_24_cidr(str(row["ip"] or ""))
                 if not cidr:
                     continue
-                bucket = cidr_buckets.setdefault(cidr, {"value": cidr, "label": cidr, "ips": set(), "users": set(), "last_seen_at": 0})
+                bucket = cidr_buckets.setdefault(
+                    cidr,
+                    {
+                        "value": cidr,
+                        "label": cidr,
+                        "ips": set(),
+                        "users": set(),
+                        "last_seen_at": 0,
+                    },
+                )
                 bucket["ips"].add(str(row["ip"]))
                 bucket["users"].add(int(row["user_id"]))
-                bucket["last_seen_at"] = max(int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0))
+                bucket["last_seen_at"] = max(
+                    int(bucket["last_seen_at"]), int(row["last_seen_at"] or 0)
+                )
             return [
-                {"value": cidr, "label": cidr, "sub": f"{len(bucket['ips'])} IP / {len(bucket['users'])} 用户", "last_seen_at": int(bucket["last_seen_at"])}
-                for cidr, bucket in sorted(cidr_buckets.items(), key=lambda item: (-int(item[1]["last_seen_at"]), item[0]))
+                {
+                    "value": cidr,
+                    "label": cidr,
+                    "sub": f"{len(bucket['ips'])} IP / {len(bucket['users'])} 用户",
+                    "last_seen_at": int(bucket["last_seen_at"]),
+                }
+                for cidr, bucket in sorted(
+                    cidr_buckets.items(),
+                    key=lambda item: (-int(item[1]["last_seen_at"]), item[0]),
+                )
             ]
     return []
+
 
 def ignored_rule_toggle_sync(cache_path: Path, dimension: str, value: str) -> bool:
     init_cache(cache_path)
@@ -2403,12 +3300,25 @@ def ignored_rule_toggle_sync(cache_path: Path, dimension: str, value: str) -> bo
         raise ValueError("unsupported ignore dimension")
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
-        exists = conn.execute("SELECT 1 FROM ignored_ip_rules WHERE dimension = ? AND value = ?", (dimension, value)).fetchone()
+        exists = conn.execute(
+            "SELECT 1 FROM ignored_ip_rules WHERE dimension = ? AND value = ?",
+            (dimension, value),
+        ).fetchone()
         if exists:
-            conn.execute("DELETE FROM ignored_ip_rules WHERE dimension = ? AND value = ?", (dimension, value))
-            reason = {"area": "manual_area", "asn": "manual_asn", "cidr": "manual_cidr"}.get(dimension, "")
+            conn.execute(
+                "DELETE FROM ignored_ip_rules WHERE dimension = ? AND value = ?",
+                (dimension, value),
+            )
+            reason = {
+                "area": "manual_area",
+                "asn": "manual_asn",
+                "cidr": "manual_cidr",
+            }.get(dimension, "")
             if reason:
-                conn.execute("UPDATE active_ip_records SET ignored_at = NULL, ignore_reason = NULL, ignore_note = NULL WHERE ignore_reason = ?", (reason,))
+                conn.execute(
+                    "UPDATE active_ip_records SET ignored_at = NULL, ignore_reason = NULL, ignore_note = NULL WHERE ignore_reason = ?",
+                    (reason,),
+                )
             apply_ignored_rules_conn(conn, now_ts)
             return False
         conn.execute(
@@ -2417,14 +3327,22 @@ def ignored_rule_toggle_sync(cache_path: Path, dimension: str, value: str) -> bo
             VALUES (?, ?, ?, ?)
             ON CONFLICT(dimension, value) DO UPDATE SET updated_at = excluded.updated_at
             """,
- (dimension, value, now_ts, now_ts),
+            (dimension, value, now_ts, now_ts),
         )
         apply_ignored_rules_conn(conn, now_ts)
         return True
 
+
 def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
-    conn.execute("DELETE FROM ignored_ip_rules WHERE dimension NOT IN ('area', 'asn', 'cidr')")
-    area_rules = [str(row["value"] or "") for row in conn.execute("SELECT value FROM ignored_ip_rules WHERE dimension = 'area'").fetchall()]
+    conn.execute(
+        "DELETE FROM ignored_ip_rules WHERE dimension NOT IN ('area', 'asn', 'cidr')"
+    )
+    area_rules = [
+        str(row["value"] or "")
+        for row in conn.execute(
+            "SELECT value FROM ignored_ip_rules WHERE dimension = 'area'"
+        ).fetchall()
+    ]
     if area_rules:
         placeholders = ",".join("?" for _ in area_rules)
         conn.execute(
@@ -2447,7 +3365,12 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
             """,
             [now_ts, *area_rules, *area_rules],
         )
-    asn_rules = {str(row["value"] or "") for row in conn.execute("SELECT value FROM ignored_ip_rules WHERE dimension = 'asn'").fetchall()}
+    asn_rules = {
+        str(row["value"] or "")
+        for row in conn.execute(
+            "SELECT value FROM ignored_ip_rules WHERE dimension = 'asn'"
+        ).fetchall()
+    }
     if asn_rules:
         rows = conn.execute(
             """
@@ -2457,7 +3380,11 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
             WHERE a.ignored_at IS NULL AND g.raw IS NOT NULL AND g.raw != ''
             """
         ).fetchall()
-        targets = [(int(row["user_id"]), str(row["ip"])) for row in rows if (asn_key_for_geo_row(row) in asn_rules)]
+        targets = [
+            (int(row["user_id"]), str(row["ip"]))
+            for row in rows
+            if (asn_key_for_geo_row(row) in asn_rules)
+        ]
         if targets:
             conn.executemany(
                 """
@@ -2467,7 +3394,12 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
                 """,
                 [(now_ts, user_id, ip) for user_id, ip in targets],
             )
-    cidr_rules = [str(row["value"] or "") for row in conn.execute("SELECT value FROM ignored_ip_rules WHERE dimension = 'cidr'").fetchall()]
+    cidr_rules = [
+        str(row["value"] or "")
+        for row in conn.execute(
+            "SELECT value FROM ignored_ip_rules WHERE dimension = 'cidr'"
+        ).fetchall()
+    ]
     if cidr_rules:
         networks = []
         for rule in cidr_rules:
@@ -2478,7 +3410,9 @@ def apply_ignored_rules_conn(conn: sqlite3.Connection, now_ts: int) -> None:
             if net.version == 4:
                 networks.append(net)
         if networks:
-            rows = conn.execute("SELECT user_id, ip FROM active_ip_records WHERE ignored_at IS NULL").fetchall()
+            rows = conn.execute(
+                "SELECT user_id, ip FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchall()
             targets = []
             for row in rows:
                 try:

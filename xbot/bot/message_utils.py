@@ -32,6 +32,7 @@ async def reply_connection_status(update: Update, cfg: AppConfig) -> None:
         reply_markup=ReplyKeyboardRemove(),
     )
 
+
 async def edit_or_replace_status(
     status_message,
     result: str,
@@ -41,7 +42,9 @@ async def edit_or_replace_status(
 ) -> None:
     """Prefer editing the waiting message; fall back to replace if Telegram refuses."""
     try:
-        await status_message.edit_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
+        await status_message.edit_text(
+            result, parse_mode=parse_mode, reply_markup=reply_markup
+        )
     except BadRequest as exc:
         log.warning("编辑测试消息失败，改为删除后重新发送：%s", exc)
         try:
@@ -49,7 +52,10 @@ async def edit_or_replace_status(
         except BadRequest:
             pass
         if update.effective_message:
-            await update.effective_message.reply_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
+            await update.effective_message.reply_text(
+                result, parse_mode=parse_mode, reply_markup=reply_markup
+            )
+
 
 async def edit_or_replace_status_any(
     status_message,
@@ -61,9 +67,13 @@ async def edit_or_replace_status_any(
     """Edit either a text status message or a photo-caption status card."""
     try:
         if getattr(status_message, "caption", None) is not None:
-            await status_message.edit_caption(caption=result, parse_mode=parse_mode, reply_markup=reply_markup)
+            await status_message.edit_caption(
+                caption=result, parse_mode=parse_mode, reply_markup=reply_markup
+            )
         else:
-            await status_message.edit_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
+            await status_message.edit_text(
+                result, parse_mode=parse_mode, reply_markup=reply_markup
+            )
     except BadRequest as exc:
         log.warning("编辑状态消息失败，改为删除后重新发送：%s", exc)
         try:
@@ -71,7 +81,13 @@ async def edit_or_replace_status_any(
         except BadRequest:
             pass
         if update.effective_message:
-            await update.effective_message.reply_text(result, parse_mode=parse_mode, reply_markup=reply_markup)
+            await update.effective_message.reply_text(
+                result, parse_mode=parse_mode, reply_markup=reply_markup
+            )
 
 
-__all__ = ["edit_or_replace_status", "edit_or_replace_status_any", "reply_connection_status"]
+__all__ = [
+    "edit_or_replace_status",
+    "edit_or_replace_status_any",
+    "reply_connection_status",
+]

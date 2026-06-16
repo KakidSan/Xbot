@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import AppConfig, MySQLConfig
+
 from ..common import (
     Any,
     MySQLError,
@@ -12,14 +17,21 @@ from ..common import (
 )
 from .redis import test_redis_connection_sync, tcp_check
 
+
 def mysql_config_missing(cfg: MySQLConfig) -> bool:
-    return not cfg.host.strip() or not cfg.port or not cfg.username.strip() or not cfg.database.strip()
+    return (
+        not cfg.host.strip()
+        or not cfg.port
+        or not cfg.username.strip()
+        or not cfg.database.strip()
+    )
+
 
 def mysql_connect(cfg: MySQLConfig):
     """Create a MySQL connection used only for SELECT queries in this app."""
     return pymysql.connect(
         host=cfg.host.strip(),
-        port=int(cfg.port),
+        port=int(cfg.port or 0),
         user=cfg.username.strip(),
         password=cfg.password,
         database=cfg.database.strip(),
@@ -31,7 +43,10 @@ def mysql_connect(cfg: MySQLConfig):
         cursorclass=pymysql.cursors.DictCursor,
     )
 
-def collect_traffic_counters_sync(cfg: MySQLConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+
+def collect_traffic_counters_sync(
+    cfg: MySQLConfig,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Read current Xboard daily cumulative counters for users and nodes using SELECT only."""
     if mysql_config_missing(cfg):
         return [], []
@@ -50,7 +65,7 @@ def collect_traffic_counters_sync(cfg: MySQLConfig) -> tuple[list[dict[str, Any]
                 WHERE su.record_type = 'd' AND su.record_at = %s
                 GROUP BY su.user_id
                 """,
- (record_at,),
+                (record_at,),
             )
             user_rows = cursor.fetchall()
             cursor.execute(
@@ -63,12 +78,13 @@ def collect_traffic_counters_sync(cfg: MySQLConfig) -> tuple[list[dict[str, Any]
                 WHERE ss.record_type = 'd' AND ss.record_at = %s
                 GROUP BY ss.server_id
                 """,
- (record_at,),
+                (record_at,),
             )
             node_rows = cursor.fetchall()
     finally:
         conn.close()
     return list(user_rows), list(node_rows)
+
 
 def test_mysql_connection_sync(cfg: MySQLConfig) -> str:
     """Return a user-facing MySQL diagnosis message.
@@ -81,7 +97,7 @@ def test_mysql_connection_sync(cfg: MySQLConfig) -> str:
         return "⚠️ MySQL 连接失败\n\n❌ MySQL 连接信息未输入完整。"
 
     host = cfg.host.strip()
-    port = int(cfg.port)
+    port = int(cfg.port or 0)
     ok, tcp_lines = tcp_check(host, port, "MySQL")
     if not ok:
         return "\n".join(["⚠️ MySQL 连接失败", "", *tcp_lines])
@@ -90,11 +106,13 @@ def test_mysql_connection_sync(cfg: MySQLConfig) -> str:
         conn = mysql_connect(cfg)
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT VERSION() AS version, DATABASE() AS database_name")
+                cursor.execute(
+                    "SELECT VERSION() AS version, DATABASE() AS database_name"
+                )
                 row = cursor.fetchone() or {}
                 cursor.execute(
                     "SELECT COUNT(*) AS table_count FROM information_schema.tables WHERE table_schema = %s",
- (cfg.database.strip(),),
+                    (cfg.database.strip(),),
                 )
                 table_row = cursor.fetchone() or {}
         finally:
@@ -109,30 +127,37 @@ def test_mysql_connection_sync(cfg: MySQLConfig) -> str:
             reason = "❌ MySQL 服务连接中断或无法建立连接。"
         else:
             reason = "❌ MySQL 返回错误，请根据错误代码继续分析。"
-        return "\n".join([
-            "⚠️ MySQL 连接失败",
-            "",
-            "✅ MySQL 端口可访问。",
-            "❌ MySQL 登录或查询失败。",
-            f"❌ 错误类型：{html_code(type(exc).__name__)}",
-            f"❌ 错误代码：{html_code(errno)}",
-            reason,
-        ])
+        return "\n".join(
+            [
+                "⚠️ MySQL 连接失败",
+                "",
+                "✅ MySQL 端口可访问。",
+                "❌ MySQL 登录或查询失败。",
+                f"❌ 错误类型：{html_code(type(exc).__name__)}",
+                f"❌ 错误代码：{html_code(errno)}",
+                reason,
+            ]
+        )
 
     version = str(row.get("version") or "unknown")
     table_count = int(table_row.get("table_count") or 0)
-    return "\n".join([
-        "✅ MySQL 连接成功",
-        "",
-        "✅ MySQL 端口可访问。",
-        "✅ MySQL 登录成功。",
-        "✅ MySQL 数据库可访问。",
-        "✅ MySQL 只读查询测试成功。",
-        f"✅ 数据表数量：{table_count}",
-        f"✅ MySQL 版本：{version}",
-    ])
+    return "\n".join(
+        [
+            "✅ MySQL 连接成功",
+            "",
+            "✅ MySQL 端口可访问。",
+            "✅ MySQL 登录成功。",
+            "✅ MySQL 数据库可访问。",
+            "✅ MySQL 只读查询测试成功。",
+            f"✅ 数据表数量：{table_count}",
+            f"✅ MySQL 版本：{version}",
+        ]
+    )
 
-def fetch_user_display_details_sync(cfg: MySQLConfig, user_ids: set[int]) -> dict[int, dict[str, str]]:
+
+def fetch_user_display_details_sync(
+    cfg: MySQLConfig, user_ids: set[int]
+) -> dict[int, dict[str, str]]:
     """Fetch Xboard user display fields using read-only SELECT."""
     if not user_ids or mysql_config_missing(cfg):
         return {}
@@ -154,8 +179,13 @@ def fetch_user_display_details_sync(cfg: MySQLConfig, user_ids: set[int]) -> dic
         email = str(row.get("email") or "").strip().replace("\n", " ")[:120]
         display_name = (remarks or email)[:80]
         if xboard_user_id:
-            details[xboard_user_id] = {"display_name": display_name, "remarks": remarks, "email": email}
+            details[xboard_user_id] = {
+                "display_name": display_name,
+                "remarks": remarks,
+                "email": email,
+            }
     return details
+
 
 def fetch_all_user_display_details_sync(cfg: MySQLConfig) -> dict[int, dict[str, str]]:
     """Fetch all Xboard users for configuration lists using read-only SELECT."""
@@ -178,10 +208,17 @@ def fetch_all_user_display_details_sync(cfg: MySQLConfig) -> dict[int, dict[str,
         email = str(row.get("email") or "").strip().replace("\n", " ")[:120]
         display_name = (remarks or email)[:80]
         if xboard_user_id:
-            details[xboard_user_id] = {"display_name": display_name, "remarks": remarks, "email": email}
+            details[xboard_user_id] = {
+                "display_name": display_name,
+                "remarks": remarks,
+                "email": email,
+            }
     return details
 
-def connection_check_lines_sync(cfg: AppConfig, cache_path: Path) -> tuple[list[str], bool, bool, bool]:
+
+def connection_check_lines_sync(
+    cfg: AppConfig, cache_path: Path
+) -> tuple[list[str], bool, bool, bool]:
     from .cache import cache_connect, init_cache
 
     mysql_result = test_mysql_connection_sync(cfg.mysql)

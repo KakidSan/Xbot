@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import RedisConfig
+
 from ..common import (
     Any,
     AuthenticationError,
@@ -19,6 +24,7 @@ ONLINE_IP_KEY_SPECS: tuple[tuple[str, str, str], ...] = (
     ("Heki", "heki:ip:*", r"heki:ip:(\d+):(.+)"),
     ("Soga", "soga_conn_*", r"soga_conn_(\d+)_(.+)"),
 )
+
 
 def tcp_check(host: str, port: int, service_name: str) -> tuple[bool, list[str]]:
     """Check TCP reachability without exposing configured host/port in messages."""
@@ -43,8 +49,10 @@ def tcp_check(host: str, port: int, service_name: str) -> tuple[bool, list[str]]
             f"❌ 可能是地址错误、路由不可达、防火墙拦截，或 {service_name} 未监听外部连接。",
         ]
 
+
 def redis_config_missing(cfg: RedisConfig) -> bool:
     return not cfg.host.strip() or not cfg.port
+
 
 def redis_readable_summary(client: redis.Redis, cfg: RedisConfig) -> list[str]:
     """Read a small Redis summary and render it in human-friendly lines.
@@ -79,10 +87,14 @@ def redis_readable_summary(client: redis.Redis, cfg: RedisConfig) -> list[str]:
             ttl_counter["有过期时间"] += 1
 
     if type_counter:
-        type_text = "，".join(f"{name}: {count}" for name, count in sorted(type_counter.items()))
+        type_text = "，".join(
+            f"{name}: {count}" for name, count in sorted(type_counter.items())
+        )
         lines.append(f"✅ 抽样 Key 类型分布：{type_text}")
     if ttl_counter:
-        ttl_text = "，".join(f"{name}: {count}" for name, count in sorted(ttl_counter.items()))
+        ttl_text = "，".join(
+            f"{name}: {count}" for name, count in sorted(ttl_counter.items())
+        )
         lines.append(f"✅ 抽样 Key 过期状态：{ttl_text}")
 
     online_key_counts: list[str] = []
@@ -96,16 +108,18 @@ def redis_readable_summary(client: redis.Redis, cfg: RedisConfig) -> list[str]:
     lines.append(f"✅ XBoard 在线设备 Key 数量：{device_count}")
     return lines
 
+
 def redis_client(cfg: RedisConfig) -> redis.Redis:
     return redis.Redis(
         host=cfg.host.strip(),
-        port=int(cfg.port),
+        port=int(cfg.port or 0),
         password=cfg.password,
         db=cfg.db,
         socket_connect_timeout=3,
         socket_timeout=5,
         decode_responses=True,
     )
+
 
 def redis_failure_message(exc: Exception) -> str:
     if isinstance(exc, AuthenticationError):
@@ -118,6 +132,7 @@ def redis_failure_message(exc: Exception) -> str:
         return f"❌ Redis 返回错误。\n❌ 错误类型：{html_code(type(exc).__name__)}"
     return f"❌ Redis 检查失败。\n❌ 错误类型：{html_code(type(exc).__name__)}"
 
+
 def test_redis_connection_sync(cfg: RedisConfig) -> str:
     """Return a user-facing Redis diagnosis message.
 
@@ -128,7 +143,7 @@ def test_redis_connection_sync(cfg: RedisConfig) -> str:
         return "⚠️ Redis 连接失败\n\n❌ Redis 连接信息未输入完整。"
 
     host = cfg.host.strip()
-    port = int(cfg.port)
+    port = int(cfg.port or 0)
     ok, tcp_lines = tcp_check(host, port, "Redis")
     if not ok:
         return "\n".join(["⚠️ Redis 连接失败", "", *tcp_lines])
@@ -140,17 +155,27 @@ def test_redis_connection_sync(cfg: RedisConfig) -> str:
             return f"⚠️ Redis 连接失败\n\n✅ Redis 端口可访问。\n❌ Redis PING 返回异常：{pong}"
         summary_lines = redis_readable_summary(client, cfg)
     except RedisError as exc:
-        return "\n".join(["⚠️ Redis 连接失败", "", "✅ Redis 端口可访问。", redis_failure_message(exc)])
+        return "\n".join(
+            [
+                "⚠️ Redis 连接失败",
+                "",
+                "✅ Redis 端口可访问。",
+                redis_failure_message(exc),
+            ]
+        )
     finally:
         client.close()
 
-    return "\n".join([
-        "✅ Redis 连接成功",
-        "",
-        "✅ Redis 端口可访问。",
-        "✅ Redis PING 测试成功。",
-        *summary_lines,
-    ])
+    return "\n".join(
+        [
+            "✅ Redis 连接成功",
+            "",
+            "✅ Redis 端口可访问。",
+            "✅ Redis PING 测试成功。",
+            *summary_lines,
+        ]
+    )
+
 
 def last_seen_from_ttl(ttl: int) -> datetime | None:
     """Roughly estimate last online time from Heki/Soga ip string key TTL."""
@@ -160,7 +185,10 @@ def last_seen_from_ttl(ttl: int) -> datetime | None:
     elapsed_seconds = max(0, base_ttl_seconds - ttl)
     return datetime.now() - timedelta(seconds=elapsed_seconds)
 
-def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int, int, str]] | str:
+
+def collect_redis_ip_records_sync(
+    cfg: RedisConfig,
+) -> list[tuple[int, str, int, int, str]] | str:
     """Collect Redis Heki/Soga IP records as (user_id, ip, last_seen_ts, ttl, source_key).
 
     Heki writes heki:ip:<user_id>:<ip> keys. Current Soga writes
@@ -195,13 +223,15 @@ def collect_redis_ip_records_sync(cfg: RedisConfig) -> list[tuple[int, str, int,
                     last_seen = last_seen_from_ttl(int(ttl))
                     if last_seen is None:
                         continue
-                    records.append((
-                        int(match.group(1)),
-                        match.group(2),
-                        int(last_seen.timestamp()),
-                        int(ttl),
-                        key_text,
-                    ))
+                    records.append(
+                        (
+                            int(match.group(1)),
+                            match.group(2),
+                            int(last_seen.timestamp()),
+                            int(ttl),
+                            key_text,
+                        )
+                    )
                 key_batch.clear()
 
             for key in client.scan_iter(match=pattern, count=1000):

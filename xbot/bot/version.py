@@ -46,7 +46,9 @@ def _is_bot_self_update(update: Update, bot_ctx: BotContext) -> bool:
     if not user:
         return False
     token_bot_id = _bot_id_from_token(bot_ctx.cfg.telegram.bot_token)
-    return bool(getattr(user, "is_bot", False)) or (token_bot_id is not None and user.id == token_bot_id)
+    return bool(getattr(user, "is_bot", False)) or (
+        token_bot_id is not None and user.id == token_bot_id
+    )
 
 
 def _is_allowed(update: Update, bot_ctx: BotContext) -> bool:
@@ -72,10 +74,14 @@ async def version_command(
         return
     is_admin = is_admin_user_id(_user_id(update), bot_ctx.cfg)
     if is_admin:
-        status_message = await reply_cover_card(update, context, "正在检查版本更新，请稍候...")
+        status_message = await reply_cover_card(
+            update, context, "正在检查版本更新，请稍候..."
+        )
         check = await asyncio.to_thread(version_check_sync)
     else:
-        status_message = await reply_cover_card(update, context, "正在读取当前版本，请稍候...")
+        status_message = await reply_cover_card(
+            update, context, "正在读取当前版本，请稍候..."
+        )
         check = {"current": read_app_version()}
     await edit_or_replace_status_any(
         status_message,
@@ -107,19 +113,39 @@ async def version_update_callback(
     if data == "version_update:cancel":
         await query.answer("已取消更新")
         check = await asyncio.to_thread(version_check_sync)
-        await show_callback_page(query, version_text(check, admin_view=True), version_keyboard(check, admin_view=True), parse_mode="HTML")
+        await show_callback_page(
+            query,
+            version_text(check, admin_view=True),
+            version_keyboard(check, admin_view=True),
+            parse_mode="HTML",
+        )
         return
-    match = re.fullmatch(r"version_update:start:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
+    match = re.fullmatch(
+        r"version_update:start:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data
+    )
     if match:
         target = match.group(1)
         await answer_callback_silently(query)
-        await show_callback_page(query, update_started_text(target), update_confirm_keyboard(target), parse_mode="HTML")
+        await show_callback_page(
+            query,
+            update_started_text(target),
+            update_confirm_keyboard(target),
+            parse_mode="HTML",
+        )
         return
-    match = re.fullmatch(r"version_update:confirm:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data)
+    match = re.fullmatch(
+        r"version_update:confirm:(v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)", data
+    )
     if match:
         target = match.group(1)
         await query.answer("后台更新已启动")
-        ok, message = await asyncio.to_thread(start_background_update_sync, target, str(query.message.chat_id))
+        ok, message = await asyncio.to_thread(
+            start_background_update_sync,
+            target,
+            str(query.message.chat_id)
+            if query.message and hasattr(query.message, "chat_id")
+            else "",
+        )
         if ok:
             await show_callback_page(
                 query,
@@ -127,14 +153,18 @@ async def version_update_callback(
                 f"目标版本：<code>{html.escape(target)}</code>\n\n"
                 "更新过程会在后台执行，Bot 可能会短暂离线。\n"
                 "更新成功或失败后，我会主动推送结果通知。",
-                InlineKeyboardMarkup([[InlineKeyboardButton("❌ 关闭", callback_data="close_message")]]),
+                InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ 关闭", callback_data="close_message")]]
+                ),
                 parse_mode="HTML",
             )
         else:
             await show_callback_page(
                 query,
                 "❌ <b>无法启动后台更新</b>\n────────────\n" + html.escape(message),
-                version_keyboard(await asyncio.to_thread(version_check_sync), admin_view=True),
+                version_keyboard(
+                    await asyncio.to_thread(version_check_sync), admin_view=True
+                ),
                 parse_mode="HTML",
             )
         return

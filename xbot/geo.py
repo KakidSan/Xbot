@@ -4,7 +4,6 @@ from .common import (
     Any,
     Path,
     datetime,
-    ipaddress,
     json,
     log,
     re,
@@ -14,26 +13,40 @@ from .common import (
 )
 from .db.cache import (
     apply_ignored_rules_conn,
-    asn_key_from_raw,
     cache_connect,
     ignored_rule_counts_by_dimension_sync,
     init_cache,
-    raw_geo_data,
 )
+
 
 def cache_geo_status_sync(cache_path: Path) -> dict[str, int]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
-        active_ips = int(conn.execute("SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL").fetchone()[0] or 0)
-        geo_total = int(conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0)
-        geo_pending = int(conn.execute(
-            """
+        active_ips = int(
+            conn.execute(
+                "SELECT COUNT(DISTINCT ip) FROM active_ip_records WHERE ignored_at IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
+        geo_total = int(
+            conn.execute("SELECT COUNT(*) FROM ip_geo_cache").fetchone()[0] or 0
+        )
+        geo_pending = int(
+            conn.execute(
+                """
             SELECT COUNT(*) FROM ip_geo_cache
             WHERE (queried_at IS NULL OR queried_at <= 0)
               AND (raw IS NULL OR raw = '')
             """
-        ).fetchone()[0] or 0)
-    return {"active_ips": active_ips, "geo_total": geo_total, "geo_pending": geo_pending}
+            ).fetchone()[0]
+            or 0
+        )
+    return {
+        "active_ips": active_ips,
+        "geo_total": geo_total,
+        "geo_pending": geo_pending,
+    }
+
 
 def pending_geo_ips_sync(cache_path: Path, limit: int | None = None) -> list[str]:
     init_cache(cache_path)
@@ -50,17 +63,29 @@ def pending_geo_ips_sync(cache_path: Path, limit: int | None = None) -> list[str
     with cache_connect(cache_path) as conn:
         return [str(row["ip"]) for row in conn.execute(sql, params).fetchall()]
 
+
 def estimate_geo_wait_seconds(pending_count: int, queries_per_minute: int) -> int:
     if pending_count <= 0:
         return 0
-    return int((pending_count * 60 + max(1, queries_per_minute) - 1) // max(1, queries_per_minute))
+    return int(
+        (pending_count * 60 + max(1, queries_per_minute) - 1)
+        // max(1, queries_per_minute)
+    )
+
 
 def query_ip_api_sync(ip: str) -> dict[str, Any]:
     fields = "status,message,country,countryCode,regionName,city,district,isp,as,asname,org,query"
-    url = "http://ip-api.com/json/" + urllib.parse.quote(ip, safe="") + "?" + urllib.parse.urlencode({
-        "lang": "zh-CN",
-        "fields": fields,
-    })
+    url = (
+        "http://ip-api.com/json/"
+        + urllib.parse.quote(ip, safe="")
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "lang": "zh-CN",
+                "fields": fields,
+            }
+        )
+    )
     req = urllib.request.Request(url, headers={"User-Agent": "xbot"})
     with urllib.request.urlopen(req, timeout=8) as resp:
         raw = resp.read(8192).decode("utf-8", errors="replace")
@@ -69,19 +94,40 @@ def query_ip_api_sync(ip: str) -> dict[str, Any]:
         raise RuntimeError(str(data.get("message") or "ip-api 查询失败"))
     return data
 
+
 def normalize_geo_name(value: Any) -> str:
     return str(value or "").strip().replace("臺", "台")
+
 
 def geo_text_contains(values: list[str], patterns: list[str]) -> bool:
     joined = " ".join(values)
     return any(re.search(pattern, joined, re.IGNORECASE) for pattern in patterns)
 
+
 def normalize_taiwan_city(region: str, city: str, district: str) -> str:
     county_cities = [
-        "台北市", "新北市", "桃园市", "台中市", "台南市", "高雄市",
-        "基隆市", "新竹市", "嘉义市",
-        "新竹县", "苗栗县", "彰化县", "南投县", "云林县", "嘉义县",
-        "屏东县", "宜兰县", "花莲县", "台东县", "澎湖县", "金门县", "连江县",
+        "台北市",
+        "新北市",
+        "桃园市",
+        "台中市",
+        "台南市",
+        "高雄市",
+        "基隆市",
+        "新竹市",
+        "嘉义市",
+        "新竹县",
+        "苗栗县",
+        "彰化县",
+        "南投县",
+        "云林县",
+        "嘉义县",
+        "屏东县",
+        "宜兰县",
+        "花莲县",
+        "台东县",
+        "澎湖县",
+        "金门县",
+        "连江县",
     ]
     aliases = {
         "台北": "台北市",
@@ -104,6 +150,7 @@ def normalize_taiwan_city(region: str, city: str, district: str) -> str:
             return aliases[name]
     return normalize_geo_name(region or city or district) or "台湾未知城市"
 
+
 def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
     """Build the normalized city-level area used only for active-area statistics."""
     country_code = normalize_geo_name(data.get("countryCode")).upper()
@@ -115,7 +162,9 @@ def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
 
     if country_code == "HK" or geo_text_contains(values, [r"香港", r"Hong\s*Kong"]):
         return {"key": "HK:香港", "name": "香港", "level": "sar_city"}
-    if country_code == "MO" or geo_text_contains(values, [r"澳门", r"澳門", r"Macau", r"Macao"]):
+    if country_code == "MO" or geo_text_contains(
+        values, [r"澳门", r"澳門", r"Macau", r"Macao"]
+    ):
         return {"key": "MO:澳门", "name": "澳门", "level": "sar_city"}
     if country_code == "TW" or geo_text_contains(values, [r"台湾", r"Taiwan"]):
         stat_name = normalize_taiwan_city(region, city, district)
@@ -126,12 +175,23 @@ def build_geo_stat_area(data: dict[str, Any]) -> dict[str, str]:
         if region in municipalities:
             return {"key": f"CN:{region}", "name": region, "level": "municipality"}
         stat_name = city or region or "未知城市"
-        return {"key": f"CN:{region or '未知省份'}:{stat_name}", "name": stat_name, "level": "city"}
+        return {
+            "key": f"CN:{region or '未知省份'}:{stat_name}",
+            "name": stat_name,
+            "level": "city",
+        }
 
     stat_name = city or region or country or "未知地区"
-    return {"key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}", "name": stat_name, "level": "city"}
+    return {
+        "key": f"{country_code or country or 'UNKNOWN'}:{region}:{stat_name}",
+        "name": stat_name,
+        "level": "city",
+    }
 
-def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any]) -> None:
+
+def update_geo_cache_success_sync(
+    cache_path: Path, ip: str, data: dict[str, Any]
+) -> None:
     now_ts = int(datetime.now().timestamp())
     stat_area = build_geo_stat_area(data)
     with cache_connect(cache_path) as conn:
@@ -151,7 +211,7 @@ def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any
                 raw=excluded.raw,
                 queried_at=excluded.queried_at
             """,
- (
+            (
                 ip,
                 str(data.get("country") or ""),
                 str(data.get("regionName") or ""),
@@ -193,22 +253,27 @@ def update_geo_cache_success_sync(cache_path: Path, ip: str, data: dict[str, Any
             )
         apply_ignored_rules_conn(conn, now_ts)
 
+
 def row_value(row: sqlite3.Row, name: str) -> Any:
     try:
         return row[name]
     except (KeyError, IndexError):
         return None
 
+
 def ignored_rules_text_sync(cache_path: Path) -> str:
     counts = ignored_rule_counts_by_dimension_sync(cache_path)
-    return "\n".join([
-        "📎 <b>当前忽略</b>",
-        "────────────",
-        "当前已忽略：",
-        f"📍 地区：{counts['area']}",
-        f"🏷 ASN：{counts['asn']}",
-        f"🌐 IP ：{counts['cidr']}",
-    ])
+    return "\n".join(
+        [
+            "📎 <b>当前忽略</b>",
+            "────────────",
+            "当前已忽略：",
+            f"📍 地区：{counts['area']}",
+            f"🏷 ASN：{counts['asn']}",
+            f"🌐 IP ：{counts['cidr']}",
+        ]
+    )
+
 
 def update_geo_cache_failure_sync(cache_path: Path, ip: str, error: str) -> None:
     # 失败也写 queried_at，避免坏 IP 在一次初始化里反复阻塞；后续可通过清空 queried_at 重试。
@@ -221,8 +286,9 @@ def update_geo_cache_failure_sync(cache_path: Path, ip: str, error: str) -> None
             VALUES (?, ?, ?)
             ON CONFLICT(ip) DO UPDATE SET raw=excluded.raw, queried_at=excluded.queried_at
             """,
- (ip, raw, now_ts),
+            (ip, raw, now_ts),
         )
+
 
 def backfill_geo_pending_once(cache_path: Path, limit: int = 5) -> tuple[int, int, int]:
     """Best-effort background IP geo backfill. Returns (total, success, failed)."""
@@ -245,6 +311,7 @@ def backfill_geo_pending_once(cache_path: Path, limit: int = 5) -> tuple[int, in
             failed += 1
             update_geo_cache_failure_sync(cache_path, ip, type(exc).__name__)
     return len(ips), success, failed
+
 
 def backfill_geo_pending_rate_limited(
     cache_path: Path,
@@ -276,7 +343,10 @@ def backfill_geo_pending_rate_limited(
             failed += 1
             if exc.code == 429:
                 rate_limited = True
-                log.warning("IP 归属地补全触发 ip-api 限流，等待 %.0f 秒后重试", retry_wait_seconds)
+                log.warning(
+                    "IP 归属地补全触发 ip-api 限流，等待 %.0f 秒后重试",
+                    retry_wait_seconds,
+                )
                 time.sleep(max(5.0, retry_wait_seconds))
                 if stop_when_rate_limited:
                     break
@@ -292,7 +362,10 @@ def backfill_geo_pending_rate_limited(
                 time.sleep(sleep_for)
     return len(ips), success, failed, rate_limited
 
-def backfill_geo_pending_until_complete(cache_path: Path, queries_per_minute: int = 30) -> tuple[int, int, int]:
+
+def backfill_geo_pending_until_complete(
+    cache_path: Path, queries_per_minute: int = 30
+) -> tuple[int, int, int]:
     """Backfill all pending geo records before startup decisions/notifications run.
 
     This is intentionally stricter than the periodic collector: startup with a fresh
@@ -310,11 +383,13 @@ def backfill_geo_pending_until_complete(cache_path: Path, queries_per_minute: in
         pending = cache_geo_status_sync(cache_path)["geo_pending"]
         if pending <= 0:
             break
-        current_total, current_success, current_failed, rate_limited = backfill_geo_pending_rate_limited(
-            cache_path,
-            limit=pending,
-            queries_per_minute=queries_per_minute,
-            stop_when_rate_limited=True,
+        current_total, current_success, current_failed, rate_limited = (
+            backfill_geo_pending_rate_limited(
+                cache_path,
+                limit=pending,
+                queries_per_minute=queries_per_minute,
+                stop_when_rate_limited=True,
+            )
         )
         total += current_total
         success += current_success
@@ -322,7 +397,10 @@ def backfill_geo_pending_until_complete(cache_path: Path, queries_per_minute: in
         pending_after = cache_geo_status_sync(cache_path)["geo_pending"]
         log.info(
             "启动初始化 IP 归属地补全：本轮待处理 %s 个，成功 %s 个，失败 %s 个，剩余 %s 个",
-            current_total, current_success, current_failed, pending_after,
+            current_total,
+            current_success,
+            current_failed,
+            pending_after,
         )
         if pending_after <= 0:
             break

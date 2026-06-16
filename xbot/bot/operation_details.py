@@ -16,16 +16,24 @@ def alert_type_label(alert_type: str) -> str:
     return "流量告警" if alert_type == "traffic" else "IP 监控"
 
 
-def alert_setting_before_after_detail(alert_type: str, scope: str, before: str, after: str, xboard_user_id: int | None = None) -> str:
+def alert_setting_before_after_detail(
+    alert_type: str,
+    scope: str,
+    before: str,
+    after: str,
+    xboard_user_id: int | None = None,
+) -> str:
     lines = []
     if xboard_user_id is not None:
         lines.append(f"对象：XBoard 用户 {xboard_user_id}")
-    lines.extend([
-        f"范围：{scope}",
-        f"类型：{alert_type_label(alert_type)}",
-        f"修改前：{before}",
-        f"修改后：{after}",
-    ])
+    lines.extend(
+        [
+            f"范围：{scope}",
+            f"类型：{alert_type_label(alert_type)}",
+            f"修改前：{before}",
+            f"修改后：{after}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -65,8 +73,10 @@ def ip_ignore_detail(
     ]
     if xboard_user_id is not None:
         lines.append(f"XBoard 用户：{xboard_user_id}")
-    lines.extend([
-        f"修改前：{'已忽略' if value in before_values else '未忽略'}",
-        f"修改后：{'已忽略' if value in after_values else '未忽略'}",
-    ])
+    lines.extend(
+        [
+            f"修改前：{'已忽略' if value in before_values else '未忽略'}",
+            f"修改后：{'已忽略' if value in after_values else '未忽略'}",
+        ]
+    )
     return "\n".join(lines)

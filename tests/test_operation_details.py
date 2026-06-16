@@ -23,19 +23,28 @@ class OperationDetailsTest(unittest.TestCase):
             alert_setting_before_after_detail("ip", "独立规则", "旧", "新", 123),
             "对象：XBoard 用户 123\n范围：独立规则\n类型：IP 监控\n修改前：旧\n修改后：新",
         )
-        self.assertIn("范围：白名单", alert_setting_before_after_detail("traffic", "白名单", "关", "开", 123))
+        self.assertIn(
+            "范围：白名单",
+            alert_setting_before_after_detail("traffic", "白名单", "关", "开", 123),
+        )
 
-    def test_alert_setting_before_after_detail_covers_scopes_and_alert_types(self) -> None:
+    def test_alert_setting_before_after_detail_covers_scopes_and_alert_types(
+        self,
+    ) -> None:
         self.assertEqual(
             alert_setting_before_after_detail("traffic", "白名单", "关闭", "开启", 88),
             "对象：XBoard 用户 88\n范围：白名单\n类型：流量告警\n修改前：关闭\n修改后：开启",
         )
         self.assertEqual(
-            alert_setting_before_after_detail("ip", "默认规则", "近 1 小时", "近 24 小时"),
+            alert_setting_before_after_detail(
+                "ip", "默认规则", "近 1 小时", "近 24 小时"
+            ),
             "范围：默认规则\n类型：IP 监控\n修改前：近 1 小时\n修改后：近 24 小时",
         )
         self.assertEqual(
-            alert_setting_before_after_detail("traffic", "独立规则", "1.00 GB", "2.00 GB", 42),
+            alert_setting_before_after_detail(
+                "traffic", "独立规则", "1.00 GB", "2.00 GB", 42
+            ),
             "对象：XBoard 用户 42\n范围：独立规则\n类型：流量告警\n修改前：1.00 GB\n修改后：2.00 GB",
         )
 
@@ -63,7 +72,9 @@ class OperationDetailsTest(unittest.TestCase):
             "修改前管理员：空\n修改后管理员：空\n修改前普通用户：空\n修改后普通用户：空",
         )
         self.assertEqual(
-            auth_change_detail([2], [1, 2], [10, 20], [20, 30], added_user_id=30, deleted_user_ids={10}),
+            auth_change_detail(
+                [2], [1, 2], [10, 20], [20, 30], added_user_id=30, deleted_user_ids={10}
+            ),
             "修改前管理员：2\n"
             "修改后管理员：1, 2\n"
             "修改前普通用户：10, 20\n"

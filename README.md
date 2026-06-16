@@ -2,7 +2,7 @@
 
 Xbot 2.0 起只支持 **Docker / Docker Compose** 运行。Telegram、Redis、MySQL 等连接信息通过 Compose `.env` 环境变量传入，程序启动时会由这些环境变量生成内部运行 Config；不再提供或映射外部 YAML 样例配置文件，也不再使用脚本直接安装、虚拟环境或 systemd 部署。
 
-当前版本：**2.0**
+当前版本：**3.0 Beta**
 
 - 镜像地址：`ghcr.io/kakidsan/xbot`
 - 版本检测：`https://api.github.com/repos/KakidSan/Xbot/tags`

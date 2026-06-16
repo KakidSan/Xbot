@@ -52,14 +52,26 @@ def speedtest_jump_keyboard() -> Any:
 
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("➕ 添加工具", callback_data="main_menu:parameter_config:speedtest_jump:add")],
-            [InlineKeyboardButton("➖ 删除工具", callback_data="main_menu:parameter_config:speedtest_jump:delete:0")],
+            [
+                InlineKeyboardButton(
+                    "➕ 添加工具",
+                    callback_data="main_menu:parameter_config:speedtest_jump:add",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "➖ 删除工具",
+                    callback_data="main_menu:parameter_config:speedtest_jump:delete:0",
+                )
+            ],
             back_close_row("main_menu:parameter_config", "⬅️ 返回个人设置"),
         ]
     )
 
 
-def speedtest_jump_delete_keyboard(cache_path: Path, owner_user_id: int, page: int = 0) -> Any:
+def speedtest_jump_delete_keyboard(
+    cache_path: Path, owner_user_id: int, page: int = 0
+) -> Any:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     targets = speedtest_jump_targets_sync(cache_path, owner_user_id)
@@ -67,7 +79,10 @@ def speedtest_jump_delete_keyboard(cache_path: Path, owner_user_id: int, page: i
     pages = max(1, (total + SPEEDTEST_JUMP_PAGE_SIZE - 1) // SPEEDTEST_JUMP_PAGE_SIZE)
     page = max(0, min(int(page), pages - 1))
     rows: list[list[InlineKeyboardButton]] = []
-    for row in targets[page * SPEEDTEST_JUMP_PAGE_SIZE : page * SPEEDTEST_JUMP_PAGE_SIZE + SPEEDTEST_JUMP_PAGE_SIZE]:
+    for row in targets[
+        page * SPEEDTEST_JUMP_PAGE_SIZE : page * SPEEDTEST_JUMP_PAGE_SIZE
+        + SPEEDTEST_JUMP_PAGE_SIZE
+    ]:
         rows.append(
             [
                 InlineKeyboardButton(
@@ -78,12 +93,24 @@ def speedtest_jump_delete_keyboard(cache_path: Path, owner_user_id: int, page: i
         )
     nav: list[InlineKeyboardButton] = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page - 1}"))
+        nav.append(
+            InlineKeyboardButton(
+                "⬅️ 上一页",
+                callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page - 1}",
+            )
+        )
     nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"))
     if page + 1 < pages:
-        nav.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page + 1}"))
+        nav.append(
+            InlineKeyboardButton(
+                "下一页 ➡️",
+                callback_data=f"main_menu:parameter_config:speedtest_jump:delete:{page + 1}",
+            )
+        )
     rows.append(nav)
-    rows.append(back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具"))
+    rows.append(
+        back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")
+    )
     return InlineKeyboardMarkup(rows)
 
 
@@ -116,7 +143,9 @@ async def parameter_callback(
         await answer_callback_silently(query)
         await show_callback_page(
             query,
-            await asyncio.to_thread(speedtest_jump_text, cache_path, query.from_user.id),
+            await asyncio.to_thread(
+                speedtest_jump_text, cache_path, query.from_user.id
+            ),
             speedtest_jump_keyboard(),
             parse_mode="HTML",
         )
@@ -135,28 +164,42 @@ async def parameter_callback(
         )
         return None
 
-    delete_match = re.fullmatch(r"main_menu:parameter_config:speedtest_jump:delete:(\d+)", data)
+    delete_match = re.fullmatch(
+        r"main_menu:parameter_config:speedtest_jump:delete:(\d+)", data
+    )
     if delete_match:
         page = int(delete_match.group(1))
         await answer_callback_silently(query)
         await show_callback_page(
             query,
-            await asyncio.to_thread(speedtest_jump_text, cache_path, query.from_user.id),
-            await asyncio.to_thread(speedtest_jump_delete_keyboard, cache_path, query.from_user.id, page),
+            await asyncio.to_thread(
+                speedtest_jump_text, cache_path, query.from_user.id
+            ),
+            await asyncio.to_thread(
+                speedtest_jump_delete_keyboard, cache_path, query.from_user.id, page
+            ),
             parse_mode="HTML",
         )
         return None
 
-    delete_target_match = re.fullmatch(r"main_menu:parameter_config:speedtest_jump:delete_target:(-?\d+):(\d+)", data)
+    delete_target_match = re.fullmatch(
+        r"main_menu:parameter_config:speedtest_jump:delete_target:(-?\d+):(\d+)", data
+    )
     if delete_target_match:
         target_id = int(delete_target_match.group(1))
         page = int(delete_target_match.group(2))
-        deleted = await asyncio.to_thread(speedtest_jump_target_delete_sync, cache_path, query.from_user.id, target_id)
+        deleted = await asyncio.to_thread(
+            speedtest_jump_target_delete_sync, cache_path, query.from_user.id, target_id
+        )
         await query.answer("已删除" if deleted else "该跳转不存在")
         await show_callback_page(
             query,
-            await asyncio.to_thread(speedtest_jump_text, cache_path, query.from_user.id),
-            await asyncio.to_thread(speedtest_jump_delete_keyboard, cache_path, query.from_user.id, page),
+            await asyncio.to_thread(
+                speedtest_jump_text, cache_path, query.from_user.id
+            ),
+            await asyncio.to_thread(
+                speedtest_jump_delete_keyboard, cache_path, query.from_user.id, page
+            ),
             parse_mode="HTML",
         )
         return None

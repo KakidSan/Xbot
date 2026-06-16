@@ -229,7 +229,9 @@ async def handle_main_menu_callback(
             node_id = int(select_match.group(1))
             page = int(select_match.group(2))
             text = await asyncio.to_thread(format_node_link_detail_sync, cfg, node_id)
-            keyboard = await asyncio.to_thread(node_link_detail_keyboard_sync, cache_path, query.from_user.id, page)
+            keyboard = await asyncio.to_thread(
+                node_link_detail_keyboard_sync, cache_path, query.from_user.id, page
+            )
             await show_callback_page(query, text, keyboard, parse_mode="HTML")
             return None
         if refresh_match:

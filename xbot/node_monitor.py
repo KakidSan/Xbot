@@ -42,7 +42,9 @@ def _base64_decode_subscription(raw: bytes) -> str:
         return raw.decode("utf-8", "replace")
     try:
         padding = b"=" * (-len(data) % 4)
-        return base64.b64decode(data + padding, validate=False).decode("utf-8", "replace")
+        return base64.b64decode(data + padding, validate=False).decode(
+            "utf-8", "replace"
+        )
     except Exception:
         return raw.decode("utf-8", "replace")
 
@@ -79,7 +81,9 @@ def _fetch_official_subscription_text_sync(cfg: AppConfig, flag: str) -> str:
     conn = mysql_connect(cfg.mysql)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT token FROM v2_user WHERE id = %s LIMIT 1", (user_id,))
+            cursor.execute(
+                "SELECT token FROM v2_user WHERE id = %s LIMIT 1", (user_id,)
+            )
             user = cursor.fetchone() or {}
             token = str(user.get("token") or "").strip()
             if not token:
@@ -107,7 +111,9 @@ def _fetch_official_subscription_text_sync(cfg: AppConfig, flag: str) -> str:
         return _base64_decode_subscription(response.read())
 
 
-def fetch_subscription_nodes_sync(cfg: AppConfig, *, force_refresh: bool = False) -> list[SubscriptionNode]:
+def fetch_subscription_nodes_sync(
+    cfg: AppConfig, *, force_refresh: bool = False
+) -> list[SubscriptionNode]:
     user_id = int(getattr(cfg, "link_extract_user_id", 1) or 1)
     cached = _subscription_nodes_cache.get(user_id)
     if cached and not force_refresh:
@@ -145,7 +151,9 @@ def subscription_nodes_refreshed_label_sync(cfg: AppConfig) -> str:
     return _relative_time_label(cached[0] if cached else None)
 
 
-async def subscription_nodes_refresh_loop(cfg: AppConfig, stop_event: asyncio.Event) -> None:
+async def subscription_nodes_refresh_loop(
+    cfg: AppConfig, stop_event: asyncio.Event
+) -> None:
     user_id = int(getattr(cfg, "link_extract_user_id", 1) or 1)
     event = _subscription_nodes_refresh_events.setdefault(user_id, asyncio.Event())
     while not stop_event.is_set():
@@ -171,16 +179,30 @@ def node_links_keyboard_sync(cfg: AppConfig, page: int = 0) -> Any:
     start = page * NODE_LINK_PAGE_SIZE
     rows: list[list[InlineKeyboardButton]] = []
     for node in nodes[start : start + NODE_LINK_PAGE_SIZE]:
-        rows.append([InlineKeyboardButton(node.name[:60], callback_data=f"node_link:select:{node.id}:{page}")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    node.name[:60], callback_data=f"node_link:select:{node.id}:{page}"
+                )
+            ]
+        )
     nav: list[InlineKeyboardButton] = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"node_link:page:{page - 1}"))
+        nav.append(
+            InlineKeyboardButton("⬅️ 上一页", callback_data=f"node_link:page:{page - 1}")
+        )
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"node_link:page:{page + 1}"))
+        nav.append(
+            InlineKeyboardButton("下一页 ➡️", callback_data=f"node_link:page:{page + 1}")
+        )
     if nav:
         rows.append(nav)
-    rows.append([InlineKeyboardButton("🔄 刷新", callback_data=f"node_link:refresh:{page}")])
-    rows.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back_to_main_menu")])
+    rows.append(
+        [InlineKeyboardButton("🔄 刷新", callback_data=f"node_link:refresh:{page}")]
+    )
+    rows.append(
+        [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back_to_main_menu")]
+    )
     return InlineKeyboardMarkup(rows)
 
 
@@ -203,7 +225,9 @@ def format_node_link_detail_sync(cfg: AppConfig, node_id: int) -> str:
     nodes = {node.id: node for node in fetch_subscription_nodes_sync(cfg)}
     node = nodes.get(node_id)
     if not node:
-        return "💡 <b>链接提取</b>\n────────────\n节点不存在或订阅已刷新，请返回列表重试。"
+        return (
+            "💡 <b>链接提取</b>\n────────────\n节点不存在或订阅已刷新，请返回列表重试。"
+        )
     return "\n".join(
         [
             "💡 <b>链接提取</b>",
@@ -216,7 +240,9 @@ def format_node_link_detail_sync(cfg: AppConfig, node_id: int) -> str:
     )
 
 
-def node_link_detail_keyboard_sync(cache_path: Path, owner_user_id: int, page: int = 0) -> Any:
+def node_link_detail_keyboard_sync(
+    cache_path: Path, owner_user_id: int, page: int = 0
+) -> Any:
     rows: list[list[InlineKeyboardButton]] = []
     for row in speedtest_jump_targets_sync(cache_path, owner_user_id):
         nickname = str(row.get("nickname") or row.get("telegram_id") or "测试工具")
@@ -224,6 +250,8 @@ def node_link_detail_keyboard_sync(cache_path: Path, owner_user_id: int, page: i
         telegram_id = int(row.get("telegram_id") or 0)
         url = f"https://t.me/{username}" if username else f"tg://user?id={telegram_id}"
         rows.append([InlineKeyboardButton(nickname[:60], url=url)])
-    rows.append([InlineKeyboardButton("⬅️ 返回节点列表", callback_data=f"node_link:page:{page}")])
+    rows.append(
+        [InlineKeyboardButton("⬅️ 返回节点列表", callback_data=f"node_link:page:{page}")]
+    )
     rows.append([InlineKeyboardButton("❌ 关闭", callback_data="close_message")])
     return InlineKeyboardMarkup(rows)

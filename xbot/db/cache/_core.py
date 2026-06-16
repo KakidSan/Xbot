@@ -705,7 +705,9 @@ def init_cache(path: Path) -> None:
             conn.execute("ALTER TABLE active_ip_records ADD COLUMN ignore_note TEXT")
         speedtest_columns = {
             row[1]
-            for row in conn.execute("PRAGMA table_info(speedtest_jump_targets)").fetchall()
+            for row in conn.execute(
+                "PRAGMA table_info(speedtest_jump_targets)"
+            ).fetchall()
         }
         if "username" not in speedtest_columns:
             conn.execute("ALTER TABLE speedtest_jump_targets ADD COLUMN username TEXT")
@@ -800,7 +802,9 @@ def ui_pref_delete_sync(cache_path: Path, user_id: int, key: str) -> None:
         )
 
 
-def speedtest_jump_targets_sync(cache_path: Path, owner_user_id: int) -> list[dict[str, Any]]:
+def speedtest_jump_targets_sync(
+    cache_path: Path, owner_user_id: int
+) -> list[dict[str, Any]]:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         rows = conn.execute(
@@ -815,7 +819,13 @@ def speedtest_jump_targets_sync(cache_path: Path, owner_user_id: int) -> list[di
     return [dict(row) for row in rows]
 
 
-def speedtest_jump_target_upsert_sync(cache_path: Path, owner_user_id: int, telegram_id: int, nickname: str, username: str | None = None) -> None:
+def speedtest_jump_target_upsert_sync(
+    cache_path: Path,
+    owner_user_id: int,
+    telegram_id: int,
+    nickname: str,
+    username: str | None = None,
+) -> None:
     init_cache(cache_path)
     now_ts = int(datetime.now().timestamp())
     with cache_connect(cache_path) as conn:
@@ -828,15 +838,25 @@ def speedtest_jump_target_upsert_sync(cache_path: Path, owner_user_id: int, tele
                 username = excluded.username,
                 updated_at = excluded.updated_at
             """,
-            (int(owner_user_id), int(telegram_id), str(nickname), str(username or "") or None, now_ts, now_ts),
+            (
+                int(owner_user_id),
+                int(telegram_id),
+                str(nickname),
+                str(username or "") or None,
+                now_ts,
+                now_ts,
+            ),
         )
 
 
-def speedtest_jump_target_delete_sync(cache_path: Path, owner_user_id: int, telegram_id: int) -> bool:
+def speedtest_jump_target_delete_sync(
+    cache_path: Path, owner_user_id: int, telegram_id: int
+) -> bool:
     init_cache(cache_path)
     with cache_connect(cache_path) as conn:
         cur = conn.execute(
-            "DELETE FROM test_tool_targets WHERE owner_user_id = ? AND telegram_id = ?", (int(owner_user_id), int(telegram_id)),
+            "DELETE FROM test_tool_targets WHERE owner_user_id = ? AND telegram_id = ?",
+            (int(owner_user_id), int(telegram_id)),
         )
         return cur.rowcount > 0
 

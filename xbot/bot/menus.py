@@ -156,7 +156,8 @@ def parameter_config_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    "🤖 测试工具", callback_data="main_menu:parameter_config:speedtest_jump"
+                    "🤖 测试工具",
+                    callback_data="main_menu:parameter_config:speedtest_jump",
                 )
             ],
             [

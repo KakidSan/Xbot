@@ -123,7 +123,9 @@ async def handle_fallback_message(
                 ),
             )
             return
-        target_uid: int | None = int(lookup_target) if isinstance(lookup_target, int) else None
+        target_uid: int | None = (
+            int(lookup_target) if isinstance(lookup_target, int) else None
+        )
         try:
             if target_uid is None:
                 try:
@@ -136,7 +138,9 @@ async def handle_fallback_message(
                         or parsed_label
                     )
                 except Exception as exc:
-                    log.warning("通过用户名解析授权用户失败 target=%s：%s", lookup_target, exc)
+                    log.warning(
+                        "通过用户名解析授权用户失败 target=%s：%s", lookup_target, exc
+                    )
                     await reply_cover_card(
                         update,
                         context,
@@ -232,10 +236,19 @@ async def handle_fallback_message(
                 update,
                 context,
                 "🤖 <b>添加测试工具</b>\n────────────\n请发送测试工具的 Telegram ID、@用户名 或 t.me 链接；或发送 /start 取消。",
-                InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+                InlineKeyboardMarkup(
+                    [
+                        back_close_row(
+                            "main_menu:parameter_config:speedtest_jump",
+                            "⬅️ 返回测试工具",
+                        )
+                    ]
+                ),
             )
             return
-        target_id: int | None = int(lookup_target) if isinstance(lookup_target, int) else None
+        target_id: int | None = (
+            int(lookup_target) if isinstance(lookup_target, int) else None
+        )
         username = parsed_label if isinstance(lookup_target, str) else None
         nickname = username or str(target_id)
         try:
@@ -248,7 +261,10 @@ async def handle_fallback_message(
                 or username
                 or target_id
             )
-            username = str(getattr(chat, "username", None) or username or "").lstrip("@") or None
+            username = (
+                str(getattr(chat, "username", None) or username or "").lstrip("@")
+                or None
+            )
         except Exception as exc:
             log.warning("获取测试工具信息失败 target=%s：%s", lookup_target, exc)
             if username:
@@ -259,7 +275,14 @@ async def handle_fallback_message(
                     update,
                     context,
                     "🤖 <b>添加测试工具</b>\n────────────\n无法通过该 Telegram ID 获取名称；请改用 @用户名 或 t.me 链接添加。",
-                    InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+                    InlineKeyboardMarkup(
+                        [
+                            back_close_row(
+                                "main_menu:parameter_config:speedtest_jump",
+                                "⬅️ 返回测试工具",
+                            )
+                        ]
+                    ),
                 )
                 return
         finally:
@@ -269,16 +292,52 @@ async def handle_fallback_message(
                 )
             except Exception as exc:
                 log.debug("删除测试工具输入消息失败：%s", exc)
+        if target_id is None:
+            await reply_cover_card(
+                update,
+                context,
+                "🤖 <b>添加测试工具</b>\n────────────\n无法识别测试工具，请改用 @用户名 或 t.me 链接添加。",
+                InlineKeyboardMarkup(
+                    [
+                        back_close_row(
+                            "main_menu:parameter_config:speedtest_jump",
+                            "⬅️ 返回测试工具",
+                        )
+                    ]
+                ),
+            )
+            return
+        assert target_id is not None
+        target_telegram_id: int = target_id
+        owner_user_id = user_id(update)
+        if owner_user_id is None:
+            await reply_connection_status(update, cfg)
+            return
         await asyncio.to_thread(
-            speedtest_jump_target_upsert_sync, cache_path, user_id(update), target_id, nickname, username
+            speedtest_jump_target_upsert_sync,
+            cache_path,
+            owner_user_id,
+            target_telegram_id,
+            nickname,
+            username,
         )
         user_data_of(context).pop("awaiting_speedtest_jump_id", None)
-        id_label = f"@{username}" if target_id < 0 and username else str(target_id)
+        id_label = (
+            f"@{username}"
+            if target_telegram_id < 0 and username
+            else str(target_telegram_id)
+        )
         await reply_cover_card(
             update,
             context,
             f"✅ <b>已添加测试工具</b>\n────────────\n{html.escape(nickname)} (<code>{html.escape(id_label)}</code>)",
-            InlineKeyboardMarkup([back_close_row("main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具")]),
+            InlineKeyboardMarkup(
+                [
+                    back_close_row(
+                        "main_menu:parameter_config:speedtest_jump", "⬅️ 返回测试工具"
+                    )
+                ]
+            ),
         )
         return None
 
@@ -608,13 +667,16 @@ async def handle_fallback_message(
             "7d": ("近 7 天", timedelta(days=7)),
             "30d": ("近 30 天", timedelta(days=30)),
         }
-        label, window = periods.get(period_key, (None, None))
+        query_label: str = "自定区间"
+        window: timedelta | None = None
+        if period_key in periods:
+            query_label, window = periods[period_key]
         start_ts = end_ts = None
         if period_key and period_key.startswith("custom:"):
             _, start_text, end_text = period_key.split(":", 2)
             start_ts = int(start_text)
             end_ts = int(end_text)
-            label = "自定区间"
+            query_label = "自定区间"
             window = None
         status_message = await effective_message.reply_text(
             "正在读取缓存查询该用户近期活跃 IP，请稍候..."
@@ -624,7 +686,7 @@ async def handle_fallback_message(
             query_user_ips_from_cache_sync,
             cache_path,
             xboard_user_id,
-            label,
+            query_label,
             window,
             start_ts,
             end_ts,

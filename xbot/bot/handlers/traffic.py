@@ -11,6 +11,7 @@ from ...common import (
     asyncio,
     datetime,
     ip_range_kind,
+    log,
     re,
     timedelta,
 )
@@ -619,6 +620,6 @@ async def handle_traffic_daily_callback(
         await query.answer("已删除")
         try:
             await message.delete()
-        except BadRequest:
-            pass
+        except BadRequest as exc:
+            log.debug("删除流量面板消息失败：%s", exc)
         return None

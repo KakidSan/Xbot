@@ -318,8 +318,13 @@ async def cleanup_legacy_traffic_dashboard_messages(
         message_id = int(row.get("message_id") or 0)
         try:
             await app.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        except BadRequest:
-            pass
+        except BadRequest as exc:
+            log.debug(
+                "删除旧流量面板消息失败 chat=%s message=%s：%s",
+                chat_id,
+                message_id,
+                exc,
+            )
         await asyncio.to_thread(pinned_dashboard_delete_sync, cache_path, kind, chat_id)
 
 
@@ -429,12 +434,22 @@ async def traffic_dashboard_refresh_loop(
                             True,
                         )
                         continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug(
+                        "检查置顶消息失败 chat=%s message=%s：%s",
+                        chat_id,
+                        message_id,
+                        exc,
+                    )
                 try:
                     await app.bot.delete_message(chat_id=chat_id, message_id=message_id)
-                except BadRequest:
-                    pass
+                except BadRequest as exc:
+                    log.debug(
+                        "自动删除面板消息失败 chat=%s message=%s：%s",
+                        chat_id,
+                        message_id,
+                        exc,
+                    )
                 await asyncio.to_thread(
                     pinned_dashboard_delete_message_sync,
                     cache_path,

@@ -101,8 +101,8 @@ def mark_no_auto_delete_message(
         return
     try:
         no_auto_delete_message_keys.add((str(message.chat_id), int(message.message_id)))
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("记录免自动删除消息失败：%s", exc)
 
 
 async def track_auto_delete_message(
@@ -179,8 +179,8 @@ async def show_callback_page(
             int(query.message.message_id),
         ) in no_auto_delete_message_keys:
             auto_delete = False
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("读取自动删除状态失败：%s", exc)
     try:
         if query.message.text:
             await query.message.edit_text(
@@ -302,8 +302,8 @@ async def delete_trigger_command_message(
         return
     try:
         await context_bot_delete_message_func(message.chat_id, message.message_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("删除触发命令消息失败：%s", exc)
 
 
 async def send_start_menu(
@@ -515,8 +515,10 @@ async def auto_delete_unpinned_dashboard(
         return
     try:
         await app.bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except BadRequest:
-        pass
+    except BadRequest as exc:
+        log.debug(
+            "删除临时面板消息失败 chat=%s message=%s：%s", chat_id, message_id, exc
+        )
     await asyncio.to_thread(
         pinned_dashboard_delete_message_sync, cache_path, chat_id, message_id
     )

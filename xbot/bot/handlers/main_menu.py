@@ -360,8 +360,8 @@ async def handle_close_message_callback(
     try:
         if hasattr(query.message, "delete"):
             await query.message.delete()
-    except BadRequest:
-        pass
+    except BadRequest as exc:
+        log.debug("关闭消息删除失败：%s", exc)
 
 
 async def handle_detail_back_callback(

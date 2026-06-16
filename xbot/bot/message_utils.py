@@ -49,8 +49,8 @@ async def edit_or_replace_status(
         log.warning("编辑测试消息失败，改为删除后重新发送：%s", exc)
         try:
             await status_message.delete()
-        except BadRequest:
-            pass
+        except BadRequest as delete_exc:
+            log.debug("删除测试消息失败：%s", delete_exc)
         if update.effective_message:
             await update.effective_message.reply_text(
                 result, parse_mode=parse_mode, reply_markup=reply_markup
@@ -78,8 +78,8 @@ async def edit_or_replace_status_any(
         log.warning("编辑状态消息失败，改为删除后重新发送：%s", exc)
         try:
             await status_message.delete()
-        except BadRequest:
-            pass
+        except BadRequest as delete_exc:
+            log.debug("删除状态消息失败：%s", delete_exc)
         if update.effective_message:
             await update.effective_message.reply_text(
                 result, parse_mode=parse_mode, reply_markup=reply_markup

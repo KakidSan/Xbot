@@ -10,6 +10,7 @@ from ...common import (
     Update,
     asyncio,
     is_admin_user_id,
+    log,
 )
 from ...config import AppConfig
 from ...db.cache import initialization_progress_text_sync, initialization_status_sync
@@ -106,8 +107,8 @@ async def handle_health_command(
     else:
         try:
             await status_message.delete()
-        except BadRequest:
-            pass
+        except BadRequest as exc:
+            log.debug("删除状态消息失败：%s", exc)
         await reply_long_text(update.effective_message, text, parse_mode="HTML")
 
 

@@ -168,8 +168,8 @@ async def handle_fallback_message(
             await context_bot_delete_message(
                 effective_message.chat_id, effective_message.message_id
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("删除授权输入消息失败：%s", exc)
         return None
 
     if user_data_of(context).get("awaiting_custom_cover"):

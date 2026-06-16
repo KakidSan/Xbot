@@ -265,8 +265,8 @@ def consume_update_status_sync() -> dict[str, Any] | None:
         data["current_version"] = read_app_version()
     try:
         UPDATE_STATUS_FILE.unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("删除更新状态文件失败：%s", exc)
     return data
 
 

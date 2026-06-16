@@ -28,6 +28,7 @@ from ...common import (
     html,
     ipaddress,
     json,
+    log,
     parse_ip_kind,
     re,
     sqlite3,
@@ -1385,8 +1386,8 @@ def alert_global_threshold_sync(cache_path: Path, alert_type: str) -> int:
             parsed = int(value)
             if parsed > 0:
                 return parsed
-        except ValueError:
-            pass
+        except ValueError as exc:
+            log.warning("忽略无效告警阈值配置 %s=%r：%s", key, value, exc)
     return (
         TRAFFIC_ALERT_DEFAULT_THRESHOLD_BYTES
         if alert_type == "traffic"
@@ -1818,8 +1819,8 @@ def cache_retention_days_sync(cache_path: Path) -> int:
             parsed = int(value)
             if parsed >= 0:
                 return parsed
-        except ValueError:
-            pass
+        except ValueError as exc:
+            log.warning("忽略无效缓存保留天数配置 %r：%s", value, exc)
     return DEFAULT_CACHE_RETENTION_DAYS
 
 
@@ -2268,8 +2269,8 @@ def clear_user_ip_records_multi_sync(
                     json.dumps(previous, sort_keys=True),
                     now_ts,
                 )
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            log.warning("清理 IP 告警状态缓存失败：%s", exc)
         set_collector_state(
             conn, "last_active_ip_records_cleared_at", str(now_ts), now_ts
         )

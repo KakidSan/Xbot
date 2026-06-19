@@ -29,7 +29,11 @@ class UpdateResultNoticeTest(unittest.IsolatedAsyncioTestCase):
     async def test_update_status_is_kept_when_notice_send_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = self.status_file(tmpdir)
-            app = SimpleNamespace(bot=SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("boom"))))
+            app = SimpleNamespace(
+                bot=SimpleNamespace(
+                    send_message=AsyncMock(side_effect=RuntimeError("boom"))
+                )
+            )
 
             with patch.object(updater, "UPDATE_STATUS_FILE", state_file):
                 await updater.send_update_result_notice(app)

@@ -263,11 +263,16 @@ def consume_update_status_sync() -> dict[str, Any] | None:
         data["status"] = "success"
         data["message"] = "Xbot 已重启，后台更新完成。"
         data["current_version"] = read_app_version()
+    return data
+
+
+def clear_update_status_sync() -> None:
     try:
         UPDATE_STATUS_FILE.unlink()
+    except FileNotFoundError:
+        return
     except OSError as exc:
         log.warning("删除更新状态文件失败：%s", exc)
-    return data
 
 
 def update_result_text(data: dict[str, Any]) -> str:
@@ -336,13 +341,16 @@ async def send_update_result_notice(app: Application) -> None:
     chat_id = str(data.get("chat_id") or "")
     if not chat_id:
         log.info("更新状态已读取，但没有 chat_id：%s", data)
+        await asyncio.to_thread(clear_update_status_sync)
         return
     try:
         await app.bot.send_message(
             chat_id=chat_id, text=update_result_text(data), parse_mode="HTML"
         )
     except Exception as exc:
-        log.warning("发送更新结果通知失败 chat=%s：%s", chat_id, exc)
+        log.warning("发送更新结果通知失败 chat=%s，将在下次启动重试：%s", chat_id, exc)
+        return
+    await asyncio.to_thread(clear_update_status_sync)
 
 
 async def version_update_check_loop(

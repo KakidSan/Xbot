@@ -200,9 +200,7 @@ def node_links_keyboard_sync(cfg: AppConfig, page: int = 0) -> Any:
     rows.append(
         [InlineKeyboardButton("🔄 刷新", callback_data=f"node_link:refresh:{page}")]
     )
-    rows.append(
-        [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back_to_main_menu")]
-    )
+    rows.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data="main_menu")])
     return InlineKeyboardMarkup(rows)
 
 

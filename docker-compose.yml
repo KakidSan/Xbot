@@ -1,52 +1,58 @@
 services:
   xbot:
     image: ghcr.io/kakidsan/xbot:latest
-    # 开发/本地验证镜像时可改用：
-    # build: .
     container_name: xbot
     restart: unless-stopped
     working_dir: /app
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
+      # =========================
+      # 基础运行参数
+      # =========================
+      - TZ=Asia/Shanghai
 
-      # Telegram：至少需要 Bot Token 和超级管理员 ID。
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ADMIN_USER_ID: ${TELEGRAM_ADMIN_USER_ID:?set TELEGRAM_ADMIN_USER_ID}
-      # 多个 ID 用英文逗号分隔，例如：123,456
-      TELEGRAM_MANAGER_USER_IDS: ${TELEGRAM_MANAGER_USER_IDS:-}
-      TELEGRAM_AUTHORIZED_USER_IDS: ${TELEGRAM_AUTHORIZED_USER_IDS:-}
+      # Telegram：必填。多个 ID 用英文逗号分隔，例如：123,456。
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_ADMIN_USER_ID=
 
-      # Redis 连接参数。
-      REDIS_HOST: ${REDIS_HOST:?set REDIS_HOST}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_DB: ${REDIS_DB:-0}
+      # Telegram：可选；普通管理员/授权用户也可以启动后在 Bot 内管理。
+      - TELEGRAM_MANAGER_USER_IDS=
+      - TELEGRAM_AUTHORIZED_USER_IDS=
 
-      # MySQL 连接参数。建议使用只有 SELECT 权限的只读账号。
-      MYSQL_HOST: ${MYSQL_HOST:?set MYSQL_HOST}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
-      MYSQL_USERNAME: ${MYSQL_USERNAME:?set MYSQL_USERNAME}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      # Redis：填写当前 XBoard/Heki/Soga 使用的 Redis 连接信息。
+      - REDIS_HOST=
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
 
-      # 链接提取：从指定 Xboard 用户读取官方订阅。
-      LINK_EXTRACT_USER_ID: ${LINK_EXTRACT_USER_ID:-1}
+      # MySQL：填写 XBoard 数据库连接信息；建议使用只有 SELECT 权限的只读账号。
+      - MYSQL_HOST=
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=
+      - MYSQL_USERNAME=
+      - MYSQL_PASSWORD=
 
-      # 采集间隔、IP-API 限速、缓存路径、缓存保留时间由程序内置/Bot 参数配置管理。
+      # 链接提取：从指定 XBoard 用户读取官方订阅。
+      - LINK_EXTRACT_USER_ID=1
 
-      # Bot 内「后台更新」所需参数。不开启 Docker socket 时可以保留这些值，更新按钮会提示缺少 socket。
-      UPDATE_MODE: docker-compose
-      COMPOSE_PROJECT_DIR: /compose
-      COMPOSE_FILES: docker-compose.yml
-      COMPOSE_SERVICE: xbot
-      # GHCR 镜像地址用于 Bot 后台更新拉取指定版本。
-      GHCR_IMAGE: ghcr.io/kakidsan/xbot
+      # =========================
+      # Bot 内「后台更新」
+      # =========================
+      # 这块可以直接保留；真正启用更新需要同时取消注释下方 /compose 和 docker.sock 两个挂载。
+      # 安全提醒：挂载 docker.sock 后，容器拥有宿主机 Docker 控制权，只建议可信管理员环境开启。
+      - UPDATE_MODE=docker-compose
+      - COMPOSE_PROJECT_DIR=/compose
+      - COMPOSE_FILES=docker-compose.yml
+      - COMPOSE_SERVICE=xbot
+      - GHCR_IMAGE=ghcr.io/kakidsan/xbot
     volumes:
+      # SQLite 缓存、Bot 内授权角色、参数配置、更新状态和日志都会保留在宿主机。
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.install-state:/app/.install-state
 
-      # 可选：允许 Bot 在 Telegram 内执行 Docker Compose 自更新。
-      # 安全提醒：挂载 docker.sock 后，容器拥有宿主机 Docker 控制权，只建议可信管理员环境开启。
+      # =========================
+      # 可选：允许 Bot 在 Telegram 内执行 Docker Compose 自更新
+      # =========================
+      # 注意：当前更新脚本会写入 /compose/.install-state/update-status.json，/compose 不能只读挂载。
       # - ./:/compose
       # - /var/run/docker.sock:/var/run/docker.sock

@@ -180,7 +180,8 @@ class NodeMonitorTest(unittest.TestCase):
         self.assertIn("node_link:select:12:1", callbacks)
         self.assertIn("node_link:page:0", callbacks)
         self.assertIn("node_link:refresh:1", callbacks)
-        self.assertIn("back_to_main_menu", callbacks)
+        self.assertIn("main_menu", callbacks)
+        self.assertNotIn("back_to_main_menu", callbacks)
         self.assertNotIn("main_menu:node_status", callbacks)
 
     def test_node_link_text_and_detail_escape_node_values(self) -> None:

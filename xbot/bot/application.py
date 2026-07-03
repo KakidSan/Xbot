@@ -142,7 +142,7 @@ async def run_once(
         )
     )
     report_task = asyncio.create_task(
-        traffic_report_push_loop(app, bot_ctx.cache_path, report_stop_event)
+        traffic_report_push_loop(app, bot_ctx.cfg, bot_ctx.cache_path, report_stop_event)
     )
     version_task = asyncio.create_task(
         version_update_check_loop(

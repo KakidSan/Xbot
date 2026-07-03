@@ -13,6 +13,7 @@ from .common import (
     datetime,
     is_admin_user_id,
     log,
+    os,
 )
 from .config import AppConfig
 from .db.cache import (
@@ -26,7 +27,7 @@ from .db.cache import (
     initialization_mark_started_sync,
     initialization_status_sync,
     mark_traffic_report_sent_sync,
-    notification_enabled_chats_sync,
+    default_allowlist_notification_chats_sync,
     pinned_dashboard_all_sync,
     pinned_dashboard_delete_message_sync,
     pinned_dashboard_delete_sync,
@@ -333,8 +334,11 @@ cleanup_traffic_dashboard_messages = cleanup_legacy_traffic_dashboard_messages
 
 def due_traffic_report_kinds(now: datetime | None = None) -> list[str]:
     current = now.astimezone(BEIJING_TZ) if now else beijing_now()
-    # 00:03 以后发送，给 00:00 附近最后一轮采样一点缓冲。
-    if current.hour != 0 or current.minute < 3:
+    # 默认 00:03 以后发送，给 00:00 附近最后一轮采样一点缓冲。
+    # 本地验证时可用环境变量临时调整，例如 23:59 或当前时间后一两分钟。
+    push_hour = int(os.environ.get("TRAFFIC_REPORT_PUSH_HOUR", "0") or 0)
+    push_minute = int(os.environ.get("TRAFFIC_REPORT_PUSH_MINUTE", "3") or 3)
+    if current.hour != push_hour or current.minute < push_minute:
         return []
     kinds = ["daily"]
     if current.weekday() == 0:  # 周一发送上周周报
@@ -346,6 +350,7 @@ def due_traffic_report_kinds(now: datetime | None = None) -> list[str]:
 
 async def traffic_report_push_loop(
     app: Application,
+    cfg: AppConfig,
     cache_path: Path,
     stop_event: asyncio.Event,
 ) -> None:
@@ -357,7 +362,7 @@ async def traffic_report_push_loop(
                     traffic_report_text_sync, cache_path, kind
                 )
                 chats = await asyncio.to_thread(
-                    notification_enabled_chats_sync, cache_path, kind
+                    default_allowlist_notification_chats_sync, cache_path, cfg, kind
                 )
                 sent_chats: list[str] = []
                 for chat_id in chats:

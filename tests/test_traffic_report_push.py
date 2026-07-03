@@ -2,6 +2,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,8 +18,6 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {"TRAFFIC_REPORT_PUSH_HOUR": "23", "TRAFFIC_REPORT_PUSH_MINUTE": "59"},
         ):
-            from datetime import datetime, timezone, timedelta
-
             tz = timezone(timedelta(hours=8))
             self.assertEqual(
                 due_traffic_report_kinds(datetime(2026, 7, 3, 23, 58, tzinfo=tz)), []
@@ -46,7 +45,9 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
             sent: list[tuple[str, str]] = []
 
             class FakeBot:
-                async def send_message(self, chat_id: str, text: str, parse_mode: str) -> None:
+                async def send_message(
+                    self, chat_id: str, text: str, parse_mode: str
+                ) -> None:
                     sent.append((str(chat_id), parse_mode))
                     stop_event.set()
 
@@ -59,13 +60,12 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
                 "xbot.collector.traffic_report_text_sync",
                 return_value=("日报", 1783008000, 1783094399),
             ):
-                from datetime import datetime, timezone, timedelta
-
                 fake_now.return_value = datetime(
                     2026, 7, 3, 23, 59, tzinfo=timezone(timedelta(hours=8))
                 )
                 await asyncio.wait_for(
-                    traffic_report_push_loop(app, cfg, cache_path, stop_event), timeout=2
+                    traffic_report_push_loop(app, cfg, cache_path, stop_event),
+                    timeout=2,
                 )
 
             self.assertEqual(sent, [("676104247", "HTML")])

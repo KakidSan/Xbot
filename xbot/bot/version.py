@@ -13,6 +13,7 @@ from ..common import (
     is_admin_user_id,
     re,
 )
+from ..db.cache import auto_delete_message_delete_sync
 from ..updater import (
     read_app_version,
     start_background_update_sync,
@@ -30,6 +31,18 @@ DeleteTriggerCommandMessage = Callable[[Update], Awaitable[None]]
 ReplyConnectionStatus = Callable[[Update, Any], Awaitable[None]]
 ShowCallbackPage = Callable[..., Awaitable[None]]
 AnswerCallbackSilently = Callable[[Any], Awaitable[None]]
+
+
+async def _keep_version_update_message_visible(query: Any, bot_ctx: BotContext) -> None:
+    try:
+        await asyncio.to_thread(
+            auto_delete_message_delete_sync,
+            bot_ctx.cache_path,
+            str(query.message.chat_id),
+            query.message.message_id,
+        )
+    except Exception:
+        return
 
 
 def _user_id(update: Update) -> int | None:
@@ -126,11 +139,13 @@ async def version_update_callback(
     if match:
         target = match.group(1)
         await answer_callback_silently(query)
+        await _keep_version_update_message_visible(query, bot_ctx)
         await show_callback_page(
             query,
             update_started_text(target),
             update_confirm_keyboard(target),
             parse_mode="HTML",
+            auto_delete=False,
         )
         return
     match = re.fullmatch(
@@ -147,6 +162,7 @@ async def version_update_callback(
             else "",
         )
         if ok:
+            await _keep_version_update_message_visible(query, bot_ctx)
             await show_callback_page(
                 query,
                 "⬆️ <b>后台更新已启动</b>\n────────────\n"
@@ -157,6 +173,7 @@ async def version_update_callback(
                     [[InlineKeyboardButton("❌ 关闭", callback_data="close_message")]]
                 ),
                 parse_mode="HTML",
+                auto_delete=False,
             )
         else:
             await show_callback_page(

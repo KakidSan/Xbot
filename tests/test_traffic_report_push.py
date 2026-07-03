@@ -1,5 +1,4 @@
 import asyncio
-import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -13,20 +12,20 @@ from xbot.db.cache import init_cache, traffic_report_already_sent_sync
 
 
 class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
-    def test_due_traffic_report_time_can_be_overridden(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"TRAFFIC_REPORT_PUSH_HOUR": "23", "TRAFFIC_REPORT_PUSH_MINUTE": "59"},
-        ):
-            tz = timezone(timedelta(hours=8))
-            self.assertEqual(
-                due_traffic_report_kinds(datetime(2026, 7, 3, 23, 58, tzinfo=tz)),
-                [],
-            )
-            self.assertEqual(
-                due_traffic_report_kinds(datetime(2026, 7, 3, 23, 59, tzinfo=tz)),
-                ["daily"],
-            )
+    def test_due_traffic_report_uses_fixed_default_time(self) -> None:
+        tz = timezone(timedelta(hours=8))
+        self.assertEqual(
+            due_traffic_report_kinds(datetime(2026, 7, 3, 0, 2, tzinfo=tz)),
+            [],
+        )
+        self.assertEqual(
+            due_traffic_report_kinds(datetime(2026, 7, 3, 0, 3, tzinfo=tz)),
+            ["daily"],
+        )
+        self.assertEqual(
+            due_traffic_report_kinds(datetime(2026, 7, 3, 23, 59, tzinfo=tz)),
+            [],
+        )
 
     async def test_daily_report_pushes_to_default_allowed_admin(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -55,13 +54,6 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
             app = SimpleNamespace(bot=FakeBot())
 
             with (
-                patch.dict(
-                    os.environ,
-                    {
-                        "TRAFFIC_REPORT_PUSH_HOUR": "23",
-                        "TRAFFIC_REPORT_PUSH_MINUTE": "59",
-                    },
-                ),
                 patch("xbot.collector.beijing_now") as fake_now,
                 patch(
                     "xbot.collector.traffic_report_text_sync",
@@ -69,7 +61,7 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ):
                 fake_now.return_value = datetime(
-                    2026, 7, 3, 23, 59, tzinfo=timezone(timedelta(hours=8))
+                    2026, 7, 4, 0, 3, tzinfo=timezone(timedelta(hours=8))
                 )
                 await asyncio.wait_for(
                     traffic_report_push_loop(app, cfg, cache_path, stop_event),

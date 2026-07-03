@@ -13,7 +13,6 @@ from .common import (
     datetime,
     is_admin_user_id,
     log,
-    os,
 )
 from .config import AppConfig
 from .db.cache import (
@@ -335,10 +334,7 @@ cleanup_traffic_dashboard_messages = cleanup_legacy_traffic_dashboard_messages
 def due_traffic_report_kinds(now: datetime | None = None) -> list[str]:
     current = now.astimezone(BEIJING_TZ) if now else beijing_now()
     # 默认 00:03 以后发送，给 00:00 附近最后一轮采样一点缓冲。
-    # 本地验证时可用环境变量临时调整，例如 23:59 或当前时间后一两分钟。
-    push_hour = int(os.environ.get("TRAFFIC_REPORT_PUSH_HOUR", "0") or 0)
-    push_minute = int(os.environ.get("TRAFFIC_REPORT_PUSH_MINUTE", "3") or 3)
-    if current.hour != push_hour or current.minute < push_minute:
+    if current.hour != 0 or current.minute < 3:
         return []
     kinds = ["daily"]
     if current.weekday() == 0:  # 周一发送上周周报

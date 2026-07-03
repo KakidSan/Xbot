@@ -20,7 +20,8 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
         ):
             tz = timezone(timedelta(hours=8))
             self.assertEqual(
-                due_traffic_report_kinds(datetime(2026, 7, 3, 23, 58, tzinfo=tz)), []
+                due_traffic_report_kinds(datetime(2026, 7, 3, 23, 58, tzinfo=tz)),
+                [],
             )
             self.assertEqual(
                 due_traffic_report_kinds(datetime(2026, 7, 3, 23, 59, tzinfo=tz)),
@@ -53,12 +54,19 @@ class TrafficReportPushTest(unittest.IsolatedAsyncioTestCase):
 
             app = SimpleNamespace(bot=FakeBot())
 
-            with patch.dict(
-                os.environ,
-                {"TRAFFIC_REPORT_PUSH_HOUR": "23", "TRAFFIC_REPORT_PUSH_MINUTE": "59"},
-            ), patch("xbot.collector.beijing_now") as fake_now, patch(
-                "xbot.collector.traffic_report_text_sync",
-                return_value=("日报", 1783008000, 1783094399),
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "TRAFFIC_REPORT_PUSH_HOUR": "23",
+                        "TRAFFIC_REPORT_PUSH_MINUTE": "59",
+                    },
+                ),
+                patch("xbot.collector.beijing_now") as fake_now,
+                patch(
+                    "xbot.collector.traffic_report_text_sync",
+                    return_value=("日报", 1783008000, 1783094399),
+                ),
             ):
                 fake_now.return_value = datetime(
                     2026, 7, 3, 23, 59, tzinfo=timezone(timedelta(hours=8))

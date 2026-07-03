@@ -75,10 +75,16 @@ has_docker_compose || fail "docker" "未检测到 docker compose。"
 if [[ -n "$GHCR_IMAGE" ]]; then
   write_state "running" "docker_pull_tag" "正在拉取镜像：${GHCR_IMAGE}:${TARGET_VERSION}。"
   docker pull "${GHCR_IMAGE}:${TARGET_VERSION}" || fail "docker_pull_tag" "拉取目标版本镜像失败：${GHCR_IMAGE}:${TARGET_VERSION}"
+
+  # Compose 文件通常使用 ghcr.io/.../xbot:latest。用户在 Bot 里选择具体
+  # v* 版本时，需要把该版本镜像 retag 到 Compose 正在使用的 latest，
+  # 否则后续 docker compose up 仍会按 compose.yml 的 latest 启动。
+  write_state "running" "docker_retag" "正在将目标版本镜像标记为：${GHCR_IMAGE}:latest。"
+  docker tag "${GHCR_IMAGE}:${TARGET_VERSION}" "${GHCR_IMAGE}:latest" || fail "docker_retag" "标记 latest 镜像失败：${GHCR_IMAGE}:${TARGET_VERSION}"
 else
   write_state "running" "docker_pull" "正在拉取 Compose 镜像。"
   compose_cmd pull "$COMPOSE_SERVICE" || fail "docker_pull" "docker compose pull 失败。"
 fi
 
 write_state "restarting" "docker_up" "镜像已更新，正在重建 Xbot 容器。"
-compose_cmd up -d --no-deps "$COMPOSE_SERVICE" || fail "docker_up" "docker compose up -d 失败。"
+compose_cmd up -d --no-deps --force-recreate "$COMPOSE_SERVICE" || fail "docker_up" "docker compose up -d 失败。"

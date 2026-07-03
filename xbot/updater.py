@@ -221,7 +221,7 @@ def update_started_text(target_version: str) -> str:
             "────────────",
             f"目标版本：<code>{html.escape(target_version)}</code>",
             "",
-            "更新过程将会拉取远程代码、更新 Python 依赖并重启 xbot.service。",
+            "更新过程将会拉取目标 GHCR 镜像，并通过 Docker Compose 重建 Xbot 容器。",
             "",
             "⚠️ 即将开始更新，可能会影响数据采集连续性。",
             "请再次确认是否继续。",

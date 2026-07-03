@@ -40,7 +40,9 @@ class VersionUpdateCallbackTest(unittest.IsolatedAsyncioTestCase):
             update, query = self.update_for("version_update:start:v3.0.0-beta4")
             show_callback_page = AsyncMock()
 
-            with patch("xbot.bot.version.auto_delete_message_delete_sync") as delete_sync:
+            with patch(
+                "xbot.bot.version.auto_delete_message_delete_sync"
+            ) as delete_sync:
                 await version_update_callback(
                     update,
                     SimpleNamespace(),
@@ -49,9 +51,7 @@ class VersionUpdateCallbackTest(unittest.IsolatedAsyncioTestCase):
                     AsyncMock(),
                 )
 
-            delete_sync.assert_called_once_with(
-                bot_ctx.cache_path, "676104247", 4578
-            )
+            delete_sync.assert_called_once_with(bot_ctx.cache_path, "676104247", 4578)
             show_callback_page.assert_awaited_once()
             self.assertFalse(show_callback_page.await_args.kwargs["auto_delete"])
             query.answer.assert_not_awaited()
@@ -63,7 +63,9 @@ class VersionUpdateCallbackTest(unittest.IsolatedAsyncioTestCase):
             show_callback_page = AsyncMock()
 
             with (
-                patch("xbot.bot.version.auto_delete_message_delete_sync") as delete_sync,
+                patch(
+                    "xbot.bot.version.auto_delete_message_delete_sync"
+                ) as delete_sync,
                 patch(
                     "xbot.bot.version.start_background_update_sync",
                     return_value=(True, "后台更新已启动。"),
@@ -78,9 +80,7 @@ class VersionUpdateCallbackTest(unittest.IsolatedAsyncioTestCase):
                 )
 
             query.answer.assert_awaited_once_with("后台更新已启动")
-            delete_sync.assert_called_once_with(
-                bot_ctx.cache_path, "676104247", 4578
-            )
+            delete_sync.assert_called_once_with(bot_ctx.cache_path, "676104247", 4578)
             show_callback_page.assert_awaited_once()
             self.assertFalse(show_callback_page.await_args.kwargs["auto_delete"])
 
